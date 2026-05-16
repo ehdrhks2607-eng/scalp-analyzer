@@ -1,0 +1,306 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8"/>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>두피 AI 진단</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body { background: #0c0c14; color: #f0ede8; font-family: 'Apple SD Gothic Neo','Noto Sans KR',sans-serif; }
+    @keyframes spin { to { transform: rotate(360deg); } }
+    @keyframes fadeUp { from { opacity:0; transform:translateY(14px); } to { opacity:1; transform:translateY(0); } }
+    ::-webkit-scrollbar { width: 4px; }
+    ::-webkit-scrollbar-thumb { background: rgba(167,139,250,0.3); border-radius: 4px; }
+    .fade { animation: fadeUp 0.35s ease; }
+    .spin { animation: spin 0.8s linear infinite; }
+  </style>
+</head>
+<body>
+<div id="app"></div>
+<script>
+const PRODUCTS = [
+  { id:"presedia", brand:"오주아", name:"프리세디아 샴푸", price:"54,000원", desc:"피지 과잉 분비를 조절하고 두피를 산뜻하게 세정", tag:"피지 조절", color:"#4f8ef7" },
+  { id:"fortis", brand:"오주아", name:"포르티스 샴푸", price:"54,000원", desc:"모근을 강화하고 두피 활력을 높이는 볼륨 케어", tag:"모근 강화", color:"#2cb97a" },
+  { id:"moistcalm", brand:"오주아", name:"모이스트캄 샴푸", price:"40,000원", desc:"건조하고 예민한 두피에 풍부한 수분을 공급하여 진정", tag:"보습 · 진정", color:"#5ec4d8" },
+  { id:"agingspa", brand:"오주아", name:"에이징스파 샴푸", price:"40,000원", desc:"두피 노화를 케어하고 생기 있는 두피 환경을 회복", tag:"안티에이징", color:"#9b7fe8" },
+  { id:"agingspa-clear", brand:"오주아", name:"에이징스파 클리어 폼", price:"38,000원", desc:"풍성한 폼이 두피 노폐물과 피지를 깔끔하게 딥클렌징", tag:"딥클렌징", color:"#f7a94f" },
+  { id:"osenam", brand:"오주아", name:"오세남 샴푸", price:"48,000원", desc:"자극받은 두피를 부드럽게 진정시키는 민감성 전용 샴푸", tag:"진정 · 저자극", color:"#f472b6" },
+  { id:"growsive", brand:"오주아", name:"그로우시브 샴푸", price:"48,000원", desc:"모발 성장 환경을 조성하고 두피 혈행을 촉진하는 샴푸", tag:"모발 성장", color:"#34d399" },
+  { id:"vivacity-refine", brand:"인핸싱 비바시티", name:"밀본 인핸싱 비바시티 샴푸 리파인", price:"38,000원", desc:"두피를 깨끗하게 정돈하고 일상의 생기를 더하는 리파인 샴푸", tag:"세정 · 리파인", color:"#60a5fa" },
+  { id:"vivacity-soften", brand:"인핸싱 비바시티", name:"밀본 인핸싱 비바시티 샴푸 소픈", price:"38,000원", desc:"두피에 부드러운 수분감을 더해주는 소픈 타입 샴푸", tag:"수분 · 소픈", color:"#a78bfa" },
+  { id:"carbonated", brand:"글로벌밀본", name:"밀본 카보네이티드 샴푸", price:"45,000원", desc:"탄산 성분이 모공 속 노폐물을 효과적으로 제거하는 스파 샴푸", tag:"탄산 클렌징", color:"#fb923c" },
+  { id:"purifying", brand:"글로벌밀본", name:"밀본 퓨어리파잉 젤 샴푸", price:"28,000원", desc:"젤 타입으로 피지와 비듬을 강력하게 세정하는 퓨리파잉 샴푸", tag:"강력 세정", color:"#f87171" },
+];
+
+const PROMPT = `두피 전문가로서 사진을 분석하고 반드시 아래 JSON만 반환하세요. 다른 텍스트 없이 JSON만:
+{"score":75,"grade":"B","type":"지성","detailedType":"지성-복합성 두피","conditions":["과다 피지","모공 막힘"],"severity":{"sebum":"피지: 과다","pore":"모공: 막힘경미","dandruff":"각질/비듬: 없음","inflammation":"염증: 없음","hairLoss":"탈모: 없음","moisture":"수분: 정상"},"summary":"두피 상태 종합 소견 3~4문장","diagnosis":"원인과 진행 방향 2~3문장","recommendedProductIds":["presedia"],"recommendIngredients":["살리실산 - 피지 조절","판테놀 - 두피 진정"],"avoidIngredients":["설페이트 - 과도한 세정"],"cares":[{"title":"두피 세정","description":"구체적 방법","frequency":"매일","icon":"🧴","priority":1}],"lifestyle":["생활습관 조언"],"nextCheckup":"4주 후"}
+분석기준: 피지량,모공상태,각질/비듬,두피색상,탈모징후,수분유분밸런스,모낭건강,염증여부
+제품ID: presedia(지성/피지),fortis(모근강화),moistcalm(건성/보습),agingspa(노화),agingspa-clear(딥클렌징),osenam(민감/염증),growsive(모발성장),vivacity-refine(지성),vivacity-soften(건성),carbonated(탄산클렌징),purifying(강력세정)`;
+
+const AC="#7c5cfc", AC2="#a78bfa", BG="#0c0c14", CARD="rgba(255,255,255,0.03)", BD="rgba(255,255,255,0.07)";
+const scoreColor = s => s>=80?"#4ade80":s>=60?"#facc15":s>=40?"#fb923c":"#f87171";
+const scoreLabel = s => s>=80?"매우 건강":s>=60?"양호":s>=40?"주의 필요":"집중 케어 필요";
+
+let state = { mode:"home", photos:[], curIdx:0, analyzing:false, result:null, error:null, tab:"overview", photoIdx:0 };
+function setState(p) { state={...state,...p}; render(); }
+
+function el(tag, attrs, ...children) {
+  const e = document.createElement(tag);
+  if (attrs) Object.entries(attrs).forEach(([k,v]) => {
+    if (k==="style"&&typeof v==="object") Object.assign(e.style,v);
+    else if (k.startsWith("on")) e.addEventListener(k.slice(2).toLowerCase(),v);
+    else if (k==="class") e.className=v;
+    else e.setAttribute(k,v);
+  });
+  children.flat().forEach(c => c!=null && e.appendChild(typeof c==="string"?document.createTextNode(c):c));
+  return e;
+}
+
+function addPhoto(file) {
+  if(!file||!file.type.startsWith("image/")||state.photos.length>=8) return;
+  const url=URL.createObjectURL(file);
+  const reader=new FileReader();
+  reader.onload=e=>{
+    setState({photos:[...state.photos,{url,base64:e.target.result.split(",")[1],mediaType:file.type}], mode:"capture", curIdx:state.photos.length});
+  };
+  reader.readAsDataURL(file);
+}
+
+function removePhoto(idx) {
+  const next=state.photos.filter((_,i)=>i!==idx);
+  setState({photos:next, curIdx:Math.min(state.curIdx,Math.max(0,next.length-1))});
+}
+
+async function analyze() {
+  if(!state.photos.length) return;
+  setState({analyzing:true,error:null});
+  try {
+    const parts=[
+      ...state.photos.map(p=>({inlineData:{mimeType:p.mediaType,data:p.base64}})),
+      {text:PROMPT}
+    ];
+    const res=await fetch("/api/analyze",{
+      method:"POST",
+      headers:{"Content-Type":"application/json"},
+      body:JSON.stringify({
+        contents:[{parts}],
+        generationConfig:{temperature:0.2,maxOutputTokens:2048}
+      })
+    });
+    const data=await res.json();
+    if(data.error) { setState({error:`API 오류: ${data.error.message||data.error}`,analyzing:false}); return; }
+    let text=data.candidates?.[0]?.content?.parts?.[0]?.text||"";
+    text=text.replace(/```json|```/g,"").trim();
+    let parsed=null;
+    try { parsed=JSON.parse(text); } catch(e) {
+      const start=text.indexOf("{"); const end=text.lastIndexOf("}");
+      if(start!==-1&&end!==-1) { try { parsed=JSON.parse(text.slice(start,end+1)); } catch(e2) {} }
+    }
+    if(!parsed) { setState({error:"분석 결과를 읽을 수 없습니다. 다시 시도해주세요.",analyzing:false}); return; }
+    parsed.recommendedProducts=(parsed.recommendedProductIds||[]).map(id=>PRODUCTS.find(p=>p.id===id)).filter(Boolean);
+    setState({result:parsed,mode:"result",tab:"overview",analyzing:false,photoIdx:0});
+  } catch(e) {
+    setState({error:`오류: ${e.message}`,analyzing:false});
+  }
+}
+
+function sectionTitle(text) {
+  return el("h3",{style:{fontSize:"10px",letterSpacing:"0.2em",color:AC2,textTransform:"uppercase",margin:"0 0 14px",fontWeight:700}},text);
+}
+function card(children,extra={}) {
+  const d=el("div",{style:{background:CARD,border:`1px solid ${BD}`,borderRadius:"18px",padding:"18px 20px",marginBottom:"14px",...extra}});
+  (Array.isArray(children)?children:[children]).forEach(c=>c&&d.appendChild(c));
+  return d;
+}
+
+function render() {
+  const app=document.getElementById("app");
+  app.innerHTML="";
+  if(state.mode==="home") app.appendChild(buildHome());
+  else if(state.mode==="capture") app.appendChild(buildCapture());
+  else if(state.mode==="result") app.appendChild(buildResult());
+}
+
+function buildHome() {
+  const wrap=el("div",{style:{minHeight:"100vh",background:BG,display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",padding:"24px",position:"relative"}});
+  wrap.appendChild(el("div",{style:{position:"fixed",inset:0,background:`radial-gradient(ellipse 80% 50% at 50% -10%, rgba(124,92,252,0.12) 0%, transparent 70%)`,pointerEvents:"none"}}));
+  const inner=el("div",{style:{position:"relative",zIndex:1,textAlign:"center",maxWidth:"480px",width:"100%"}});
+  inner.appendChild(el("div",{style:{fontSize:"56px",marginBottom:"20px"}},"🔬"));
+  inner.appendChild(el("div",{style:{display:"inline-flex",fontSize:"10px",letterSpacing:"0.2em",color:AC2,fontWeight:700,padding:"5px 14px",border:`1px solid ${AC2}40`,borderRadius:"20px",marginBottom:"16px"}},"AI SCALP DIAGNOSIS"));
+  inner.appendChild(el("h1",{style:{fontSize:"clamp(26px,6vw,40px)",fontWeight:800,margin:"0 0 10px",background:`linear-gradient(135deg,#f0ede8,${AC2})`,WebkitBackgroundClip:"text",WebkitTextFillColor:"transparent"}},"두피 AI 진단 리포트"));
+  inner.appendChild(el("p",{style:{color:"#5a5868",fontSize:"14px",marginBottom:"40px",lineHeight:1.7}},"두피 사진을 최대 8장 촬영하거나 업로드하면\nAI 전문 트리콜로지스트가 종합 분석 후 맞춤 제품을 추천해드려요"));
+  const camInput=el("input",{type:"file",accept:"image/*",capture:"environment",style:"display:none"});
+  const fileInput=el("input",{type:"file",accept:"image/*",multiple:"true",style:"display:none"});
+  camInput.addEventListener("change",e=>addPhoto(e.target.files[0]));
+  fileInput.addEventListener("change",e=>Array.from(e.target.files).slice(0,8).forEach(f=>addPhoto(f)));
+  inner.appendChild(camInput); inner.appendChild(fileInput);
+  inner.appendChild(el("button",{style:{padding:"18px",borderRadius:"16px",background:`linear-gradient(135deg,${AC},${AC2})`,border:"none",color:"#fff",fontSize:"16px",fontWeight:700,cursor:"pointer",boxShadow:`0 6px 28px ${AC}50`,width:"100%",marginBottom:"12px"},onClick:()=>camInput.click()},"📷  카메라로 촬영하기"));
+  inner.appendChild(el("button",{style:{padding:"16px",borderRadius:"16px",background:CARD,border:`1px solid ${BD}`,color:"#c8c4d8",fontSize:"15px",fontWeight:600,cursor:"pointer",width:"100%"},onClick:()=>fileInput.click()},"🖼  사진 업로드하기"));
+  inner.appendChild(el("p",{style:{color:"#3a3848",fontSize:"12px",marginTop:"20px"}},"최대 8장까지 • 여러 각도 촬영 권장"));
+  wrap.appendChild(inner);
+  return wrap;
+}
+
+function buildCapture() {
+  const wrap=el("div",{style:{minHeight:"100vh",background:BG}});
+  wrap.appendChild(el("div",{style:{position:"fixed",inset:0,background:`radial-gradient(ellipse 80% 50% at 50% -10%, rgba(124,92,252,0.08) 0%, transparent 70%)`,pointerEvents:"none"}}));
+  const inner=el("div",{style:{position:"relative",zIndex:1,maxWidth:"680px",margin:"0 auto",padding:"24px 16px 80px"}});
+  const header=el("div",{style:{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:"24px"}});
+  header.append(el("button",{style:{background:"none",border:"none",color:"#7a7488",cursor:"pointer",fontSize:"13px"},onClick:()=>setState({mode:"home",photos:[],curIdx:0})},"← 처음으로"),el("span",{style:{fontSize:"13px",color:"#5a5868"}},`사진 ${state.photos.length}/8장`),el("span",{}));
+  inner.appendChild(header);
+  const viewer=el("div",{style:{position:"relative",borderRadius:"20px",overflow:"hidden",background:"#080810",aspectRatio:"4/3",marginBottom:"16px",boxShadow:"0 8px 40px rgba(0,0,0,0.6)"}});
+  if(state.photos.length>0) viewer.appendChild(el("img",{src:state.photos[state.curIdx]?.url,style:{width:"100%",height:"100%",objectFit:"cover"}}));
+  if(state.photos.length>1) {
+    viewer.appendChild(el("button",{style:{position:"absolute",left:"12px",top:"50%",transform:"translateY(-50%)",background:"rgba(0,0,0,0.5)",border:"none",borderRadius:"50%",width:"36px",height:"36px",color:"#fff",fontSize:"18px",cursor:"pointer",opacity:state.curIdx===0?0.3:1},onClick:()=>setState({curIdx:Math.max(0,state.curIdx-1)})},"‹"));
+    viewer.appendChild(el("button",{style:{position:"absolute",right:"12px",top:"50%",transform:"translateY(-50%)",background:"rgba(0,0,0,0.5)",border:"none",borderRadius:"50%",width:"36px",height:"36px",color:"#fff",fontSize:"18px",cursor:"pointer",opacity:state.curIdx===state.photos.length-1?0.3:1},onClick:()=>setState({curIdx:Math.min(state.photos.length-1,state.curIdx+1)})},"›"));
+  }
+  viewer.appendChild(el("div",{style:{position:"absolute",top:"12px",right:"12px",background:"rgba(0,0,0,0.6)",borderRadius:"12px",padding:"4px 10px",fontSize:"12px",color:"#fff"}},`${state.curIdx+1} / ${state.photos.length}`));
+  viewer.appendChild(el("button",{style:{position:"absolute",top:"12px",left:"12px",background:"rgba(248,113,113,0.85)",border:"none",borderRadius:"50%",width:"32px",height:"32px",color:"#fff",fontSize:"14px",cursor:"pointer"},onClick:()=>removePhoto(state.curIdx)},"✕"));
+  inner.appendChild(viewer);
+  const thumbs=el("div",{style:{display:"flex",gap:"8px",overflowX:"auto",paddingBottom:"8px",marginBottom:"20px"}});
+  state.photos.forEach((p,i)=>{
+    const th=el("div",{style:{flexShrink:0,width:"60px",height:"60px",borderRadius:"10px",overflow:"hidden",border:`2px solid ${i===state.curIdx?AC2:"transparent"}`,cursor:"pointer",opacity:i===state.curIdx?1:0.6},onClick:()=>setState({curIdx:i})});
+    th.appendChild(el("img",{src:p.url,style:{width:"100%",height:"100%",objectFit:"cover"}}));
+    thumbs.appendChild(th);
+  });
+  if(state.photos.length<8) thumbs.appendChild(el("div",{style:{flexShrink:0,width:"60px",height:"60px",borderRadius:"10px",border:`2px dashed ${AC2}50`,display:"flex",alignItems:"center",justifyContent:"center",cursor:"pointer",color:AC2,fontSize:"22px"},onClick:()=>document.getElementById("cap2")?.click()},"+"));
+  inner.appendChild(thumbs);
+  inner.appendChild(el("div",{style:{background:`${AC}10`,border:`1px solid ${AC}30`,borderRadius:"14px",padding:"12px 16px",marginBottom:"20px"}},el("p",{style:{color:AC2,fontSize:"12px",margin:0,lineHeight:1.6}},"💡 촬영 팁: 두피 전체, 정수리, 측면, 뒷부분 등 여러 각도에서 찍을수록 더 정확해요")));
+  if(state.photos.length<8) {
+    const addRow=el("div",{style:{display:"flex",gap:"10px",marginBottom:"16px"}});
+    const c2=el("input",{type:"file",accept:"image/*",capture:"environment",style:"display:none",id:"cap2"});
+    const f2=el("input",{type:"file",accept:"image/*",multiple:"true",style:"display:none"});
+    c2.addEventListener("change",e=>addPhoto(e.target.files[0]));
+    f2.addEventListener("change",e=>Array.from(e.target.files).slice(0,8-state.photos.length).forEach(f=>addPhoto(f)));
+    addRow.append(c2,f2,el("button",{style:{flex:1,padding:"13px",borderRadius:"12px",background:CARD,border:`1px solid ${BD}`,color:"#c8c4d8",fontSize:"13px",fontWeight:600,cursor:"pointer"},onClick:()=>c2.click()},"📷 추가 촬영"),el("button",{style:{flex:1,padding:"13px",borderRadius:"12px",background:CARD,border:`1px solid ${BD}`,color:"#c8c4d8",fontSize:"13px",fontWeight:600,cursor:"pointer"},onClick:()=>f2.click()},"🖼 추가 업로드"));
+    inner.appendChild(addRow);
+  }
+  const analyzeBtn=el("button",{style:{width:"100%",padding:"18px",borderRadius:"16px",background:state.analyzing?`rgba(124,92,252,0.2)`:`linear-gradient(135deg,${AC},${AC2})`,border:"none",color:"#fff",fontSize:"16px",fontWeight:700,cursor:state.analyzing?"not-allowed":"pointer",boxShadow:state.analyzing?"none":`0 6px 28px ${AC}50`},onClick:()=>{if(!state.analyzing)analyze();}});
+  if(state.analyzing){const sp=el("span",{style:{width:"17px",height:"17px",border:"2px solid rgba(255,255,255,0.3)",borderTopColor:"#fff",borderRadius:"50%",display:"inline-block",marginRight:"10px",verticalAlign:"middle"},class:"spin"});analyzeBtn.append(sp,`${state.photos.length}장 전문 분석 중...`);}
+  else analyzeBtn.textContent=`✨ ${state.photos.length}장으로 전문 두피 진단받기`;
+  inner.appendChild(analyzeBtn);
+  if(state.error) inner.appendChild(el("div",{style:{marginTop:"12px",padding:"14px",borderRadius:"12px",background:"rgba(248,113,113,0.1)",border:"1px solid rgba(248,113,113,0.2)",color:"#f87171",textAlign:"center",fontSize:"13px"}},state.error));
+  wrap.appendChild(inner);
+  return wrap;
+}
+
+function buildResult() {
+  const r=state.result;
+  const wrap=el("div",{style:{minHeight:"100vh",background:BG}});
+  wrap.appendChild(el("div",{style:{position:"fixed",inset:0,background:`radial-gradient(ellipse 80% 50% at 50% -10%, rgba(124,92,252,0.08) 0%, transparent 70%)`,pointerEvents:"none"}}));
+  const inner=el("div",{style:{position:"relative",zIndex:1,maxWidth:"780px",margin:"0 auto",padding:"24px 16px 60px"},class:"fade"});
+  const header=el("div",{style:{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:"20px"}});
+  header.append(el("button",{style:{background:"none",border:"none",color:"#7a7488",cursor:"pointer",fontSize:"13px"},onClick:()=>setState({mode:"capture"})},"← 사진으로"),el("span",{style:{fontSize:"12px",color:"#5a5868"}},`📷 ${state.photos.length}장 분석 완료`),el("button",{style:{background:"none",border:`1px solid ${BD}`,color:"#a8a4b8",cursor:"pointer",fontSize:"12px",padding:"5px 12px",borderRadius:"10px"},onClick:()=>setState({mode:"home",photos:[],curIdx:0,result:null})},"처음으로"));
+  inner.appendChild(header);
+
+  // 사진 + 점수 나란히
+  const topRow=el("div",{style:{display:"grid",gridTemplateColumns:"1fr 1fr",gap:"14px",marginBottom:"14px"}});
+  const photoBox=el("div",{style:{background:"#080810",borderRadius:"18px",overflow:"hidden",position:"relative",border:`1px solid ${BD}`}});
+  photoBox.appendChild(el("img",{src:state.photos[state.photoIdx]?.url,style:{width:"100%",aspectRatio:"1/1",objectFit:"cover",display:"block"}}));
+  if(state.photos.length>1){
+    const thumbRow=el("div",{style:{display:"flex",gap:"4px",padding:"8px",overflowX:"auto",background:"rgba(0,0,0,0.4)"}});
+    state.photos.forEach((p,i)=>{
+      const th=el("div",{style:{flexShrink:0,width:"44px",height:"44px",borderRadius:"8px",overflow:"hidden",border:`2px solid ${i===state.photoIdx?AC2:"transparent"}`,cursor:"pointer",opacity:i===state.photoIdx?1:0.6},onClick:()=>setState({photoIdx:i})});
+      th.appendChild(el("img",{src:p.url,style:{width:"100%",height:"100%",objectFit:"cover"}}));
+      thumbRow.appendChild(th);
+    });
+    photoBox.appendChild(thumbRow);
+  }
+  photoBox.appendChild(el("div",{style:{position:"absolute",top:"10px",right:"10px",background:"rgba(0,0,0,0.7)",borderRadius:"10px",padding:"3px 8px",fontSize:"11px",color:"#fff"}},`${state.photoIdx+1}/${state.photos.length}`));
+  topRow.appendChild(photoBox);
+
+  const scoreBox=el("div",{style:{background:`linear-gradient(135deg,rgba(124,92,252,0.1),rgba(167,139,250,0.05))`,border:`1px solid ${AC}30`,borderRadius:"18px",padding:"20px",display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",gap:"12px"}});
+  const svgNS="http://www.w3.org/2000/svg";
+  const svg=document.createElementNS(svgNS,"svg"); svg.setAttribute("width","110"); svg.setAttribute("height","110"); svg.setAttribute("viewBox","0 0 100 100");
+  const bgC=document.createElementNS(svgNS,"circle"); bgC.setAttribute("cx","50"); bgC.setAttribute("cy","50"); bgC.setAttribute("r","44"); bgC.setAttribute("fill","none"); bgC.setAttribute("stroke","rgba(255,255,255,0.06)"); bgC.setAttribute("stroke-width","9");
+  const fgC=document.createElementNS(svgNS,"circle"); fgC.setAttribute("cx","50"); fgC.setAttribute("cy","50"); fgC.setAttribute("r","44"); fgC.setAttribute("fill","none"); fgC.setAttribute("stroke",scoreColor(r.score)); fgC.setAttribute("stroke-width","9"); fgC.setAttribute("stroke-dasharray",`${2.76*r.score} 276`); fgC.setAttribute("stroke-linecap","round"); fgC.setAttribute("transform","rotate(-90 50 50)");
+  const t1=document.createElementNS(svgNS,"text"); t1.setAttribute("x","50"); t1.setAttribute("y","44"); t1.setAttribute("text-anchor","middle"); t1.setAttribute("fill",scoreColor(r.score)); t1.setAttribute("font-size","24"); t1.setAttribute("font-weight","800"); t1.textContent=r.score;
+  const t2=document.createElementNS(svgNS,"text"); t2.setAttribute("x","50"); t2.setAttribute("y","60"); t2.setAttribute("text-anchor","middle"); t2.setAttribute("fill","#555"); t2.setAttribute("font-size","9"); t2.textContent="/ 100";
+  svg.append(bgC,fgC,t1,t2);
+  scoreBox.appendChild(svg);
+  const gradeBox=el("div",{style:{textAlign:"center"}});
+  gradeBox.appendChild(el("div",{style:{display:"flex",flexWrap:"wrap",gap:"6px",justifyContent:"center",marginBottom:"8px"}},[el("span",{style:{fontSize:"12px",fontWeight:700,color:scoreColor(r.score),background:`${scoreColor(r.score)}18`,padding:"4px 12px",borderRadius:"20px"}},`${r.grade||""} ${scoreLabel(r.score)}`),el("span",{style:{fontSize:"12px",fontWeight:700,color:AC2,background:`${AC}18`,padding:"4px 12px",borderRadius:"20px"}},r.type+" 두피")]));
+  if(r.detailedType) gradeBox.appendChild(el("p",{style:{fontSize:"12px",color:"#8a8490",lineHeight:1.5}},r.detailedType));
+  scoreBox.appendChild(gradeBox);
+  if(r.severity){
+    const sevGrid=el("div",{style:{display:"grid",gridTemplateColumns:"1fr 1fr",gap:"6px",width:"100%"}});
+    Object.entries(r.severity).forEach(([k,v])=>{
+      const isGood=v.includes("정상")||v.includes("없음"); const isWarn=v.includes("경미");
+      const color=isGood?"#4ade80":isWarn?"#facc15":"#f87171";
+      const item=el("div",{style:{padding:"6px 8px",borderRadius:"8px",background:`${color}10`,border:`1px solid ${color}25`}});
+      item.appendChild(el("div",{style:{fontSize:"10px",color:color,fontWeight:700,marginBottom:"2px"}},v.split(":")[0]));
+      item.appendChild(el("div",{style:{fontSize:"11px",color:"#9490a4"}},v.split(":")[1]?.trim()||v));
+      sevGrid.appendChild(item);
+    });
+    scoreBox.appendChild(sevGrid);
+  }
+  topRow.appendChild(scoreBox);
+  inner.appendChild(topRow);
+
+  const tabs=[["overview","📊 진단 소견"],["products","🛍 추천 제품"],["care","💊 케어 처방"]];
+  const tabBar=el("div",{style:{display:"flex",gap:"6px",marginBottom:"14px",background:CARD,border:`1px solid ${BD}`,borderRadius:"14px",padding:"5px"}});
+  tabs.forEach(([id,label])=>tabBar.appendChild(el("button",{style:{flex:1,padding:"10px 4px",borderRadius:"10px",border:"none",background:state.tab===id?`linear-gradient(135deg,${AC},${AC2})`:"transparent",color:state.tab===id?"#fff":"#6a6478",fontSize:"clamp(11px,2.5vw,13px)",fontWeight:700,cursor:"pointer",whiteSpace:"nowrap"},onClick:()=>setState({tab:id})},label)));
+  inner.appendChild(tabBar);
+
+  const content=el("div",{class:"fade"});
+  if(state.tab==="overview"){
+    content.appendChild(card([sectionTitle("🩺 전문가 종합 소견"),el("p",{style:{color:"#c8c4d8",fontSize:"13px",lineHeight:1.8,marginBottom:"12px"}},r.summary),r.diagnosis&&el("div",{style:{padding:"12px 14px",borderRadius:"12px",background:`${AC}08`,border:`1px solid ${AC}25`}},el("p",{style:{color:"#a8a4b8",fontSize:"12px",lineHeight:1.7,margin:0}},`💬 ${r.diagnosis}`))]));
+    if(r.conditions?.length){
+      const cc=card([sectionTitle("⚠ 발견된 두피 상태")]);
+      const chips=el("div",{style:{display:"flex",flexWrap:"wrap",gap:"6px"}});
+      r.conditions.forEach(c=>chips.appendChild(el("span",{style:{padding:"5px 12px",borderRadius:"20px",fontSize:"12px",background:`${AC}12`,border:`1px solid ${AC}30`,color:AC2}},`• ${c}`)));
+      cc.appendChild(chips); content.appendChild(cc);
+    }
+    const ic=card([sectionTitle("🧪 성분 가이드")]);
+    const grid=el("div",{style:{display:"grid",gridTemplateColumns:"1fr 1fr",gap:"12px"}});
+    const gb=el("div",{style:{padding:"12px 14px",borderRadius:"12px",background:"rgba(74,222,128,0.06)",border:"1px solid rgba(74,222,128,0.15)"}});
+    gb.appendChild(el("div",{style:{fontSize:"11px",color:"#4ade80",fontWeight:700,marginBottom:"8px"}},"✓ 추천 성분"));
+    r.recommendIngredients?.forEach(s=>gb.appendChild(el("div",{style:{fontSize:"12px",color:"#a8d8b0",marginBottom:"4px"}},`• ${s}`)));
+    const bb=el("div",{style:{padding:"12px 14px",borderRadius:"12px",background:"rgba(248,113,113,0.06)",border:"1px solid rgba(248,113,113,0.15)"}});
+    bb.appendChild(el("div",{style:{fontSize:"11px",color:"#f87171",fontWeight:700,marginBottom:"8px"}},"✗ 피할 성분"));
+    r.avoidIngredients?.forEach(s=>bb.appendChild(el("div",{style:{fontSize:"12px",color:"#d8a8a8",marginBottom:"4px"}},`• ${s}`)));
+    grid.append(gb,bb); ic.appendChild(grid); content.appendChild(ic);
+    const lc=card([sectionTitle("🌿 생활 습관 조언")]);
+    r.lifestyle?.forEach((l,i)=>{const row=el("div",{style:{display:"flex",gap:"10px",marginBottom:i<r.lifestyle.length-1?"10px":"0"}});row.append(el("span",{style:{color:AC2,fontWeight:700,fontSize:"12px",flexShrink:0}},`0${i+1}`),el("span",{style:{color:"#9490a4",fontSize:"13px",lineHeight:1.6}},l));lc.appendChild(row);});
+    if(r.nextCheckup) lc.appendChild(el("div",{style:{marginTop:"14px",padding:"10px 14px",borderRadius:"10px",background:`${AC}08`,border:`1px solid ${AC}20`}},el("p",{style:{color:AC2,fontSize:"12px",margin:0}},`📅 다음 두피 체크 권장: ${r.nextCheckup}`)));
+    content.appendChild(lc);
+  }
+  if(state.tab==="products"){
+    (r.recommendedProducts||[]).forEach((p,i)=>{
+      const pc=card([],{background:i===0?`linear-gradient(135deg,rgba(124,92,252,0.1),rgba(167,139,250,0.05))`:CARD,border:i===0?`1px solid ${AC}35`:`1px solid ${BD}`});
+      const row=el("div",{style:{display:"flex",gap:"14px",alignItems:"flex-start"}});
+      row.appendChild(el("div",{style:{width:"42px",height:"42px",borderRadius:"12px",background:i===0?`${AC}25`:"rgba(255,255,255,0.05)",display:"flex",alignItems:"center",justifyContent:"center",fontSize:"18px",flexShrink:0}},i===0?"🥇":i===1?"🥈":"🥉"));
+      const info=el("div",{style:{flex:1}});
+      info.appendChild(el("div",{style:{fontSize:"10px",color:"#6b6478",fontWeight:600,marginBottom:"4px"}},p.brand));
+      const nr=el("div",{style:{display:"flex",alignItems:"center",gap:"8px",flexWrap:"wrap",marginBottom:"5px"}});
+      nr.append(el("span",{style:{fontSize:"15px",fontWeight:700,color:"#f0ede8"}},p.name),el("span",{style:{fontSize:"10px",padding:"2px 9px",borderRadius:"10px",fontWeight:700,background:`${p.color}18`,color:p.color,border:`1px solid ${p.color}30`}},p.tag));
+      info.appendChild(nr);
+      info.appendChild(el("p",{style:{color:"#7a7488",fontSize:"12px",lineHeight:1.6,margin:"0 0 6px"}},p.desc));
+      info.appendChild(el("span",{style:{fontSize:"13px",fontWeight:700,color:AC2}},p.price));
+      row.appendChild(info); pc.appendChild(row); content.appendChild(pc);
+    });
+  }
+  if(state.tab==="care"){
+    [...(r.cares||[])].sort((a,b)=>(a.priority||9)-(b.priority||9)).forEach(care=>{
+      const cc=card([]);
+      const row=el("div",{style:{display:"flex",gap:"12px"}});
+      row.appendChild(el("div",{style:{fontSize:"24px",width:"42px",height:"42px",display:"flex",alignItems:"center",justifyContent:"center",background:"rgba(255,255,255,0.04)",borderRadius:"11px",flexShrink:0}},care.icon));
+      const info=el("div",{style:{flex:1}});
+      const tr=el("div",{style:{display:"flex",alignItems:"center",gap:"8px",marginBottom:"4px"}});
+      if(care.priority===1) tr.appendChild(el("span",{style:{fontSize:"10px",color:AC2,background:`${AC}18`,padding:"1px 8px",borderRadius:"10px",fontWeight:700}},"우선"));
+      tr.appendChild(el("span",{style:{fontSize:"13px",fontWeight:700,color:"#e8e4f0"}},care.title));
+      info.appendChild(tr);
+      info.appendChild(el("p",{style:{color:"#7a7488",fontSize:"12px",lineHeight:1.6,margin:"0 0 5px"}},care.description));
+      info.appendChild(el("span",{style:{fontSize:"11px",color:AC2,fontWeight:600}},`🗓 ${care.frequency}`));
+      row.appendChild(info); cc.appendChild(row); content.appendChild(cc);
+    });
+  }
+  inner.appendChild(content);
+  inner.appendChild(el("p",{style:{textAlign:"center",color:"#252330",fontSize:"11px",marginTop:"24px"}},"본 진단은 참고용이며 전문 의료 상담을 대체하지 않습니다"));
+  wrap.appendChild(inner);
+  return wrap;
+}
+render();
+</script>
+</body>
+</html>
