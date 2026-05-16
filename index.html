@@ -1,0 +1,305 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>두피 AI 진단</title>
+  <style>body { margin: 0; background: #0c0c14; } * { box-sizing: border-box; }</style>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/react/18.2.0/umd/react.production.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/react-dom/18.2.0/umd/react-dom.production.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/babel-standalone/7.23.2/babel.min.js"></script>
+</head>
+<body>
+  <div id="root"></div>
+  <script type="text/babel">
+    const { useState, useRef, useCallback } = React;
+
+    const STORE_PRODUCTS = [
+      { id:"presedia", brand:"오주아", name:"프리세디아 샴푸", price:"54,000원", forTypes:["지성","복합성"], forConditions:["과다 피지","두피 냄새","끈적임","모공 막힘","비듬"], description:"피지 과잉 분비를 조절하고 두피를 산뜻하게 세정", tag:"피지 조절", color:"#4f8ef7" },
+      { id:"fortis", brand:"오주아", name:"포르티스 샴푸", price:"54,000원", forTypes:["정상","복합성","건성"], forConditions:["모근 약화","탈모 징후","볼륨 저하","모발 가늘어짐"], description:"모근을 강화하고 두피 활력을 높이는 볼륨 케어", tag:"모근 강화", color:"#2cb97a" },
+      { id:"moistcalm", brand:"오주아", name:"모이스트캄 샴푸", price:"40,000원", forTypes:["건성","민감성"], forConditions:["두피 건조","각질","수분 부족","두피 당김","가려움"], description:"건조하고 예민한 두피에 풍부한 수분을 공급하여 진정", tag:"보습 · 진정", color:"#5ec4d8" },
+      { id:"agingspa", brand:"오주아", name:"에이징스파 샴푸", price:"40,000원", forTypes:["건성","정상","복합성"], forConditions:["노화 두피","탄력 저하","연령 증가","두피 활력 저하"], description:"두피 노화를 케어하고 생기 있는 두피 환경을 회복", tag:"안티에이징", color:"#9b7fe8" },
+      { id:"agingspa-clear", brand:"오주아", name:"에이징스파 클리어 폼", price:"38,000원", forTypes:["지성","복합성"], forConditions:["두피 노폐물","과다 피지","모공 막힘","두피 냄새"], description:"풍성한 폼이 두피 노폐물과 피지를 깔끔하게 딥클렌징", tag:"딥클렌징", color:"#f7a94f" },
+      { id:"osenam", brand:"오주아", name:"오세남 샴푸", price:"48,000원", forTypes:["민감성","건성"], forConditions:["두피 자극","염증","두피 붉음","예민한 두피"], description:"자극받은 두피를 부드럽게 진정시키는 민감성 전용 샴푸", tag:"진정 · 저자극", color:"#f472b6" },
+      { id:"growsive", brand:"오주아", name:"그로우시브 샴푸", price:"48,000원", forTypes:["정상","지성","복합성"], forConditions:["탈모 징후","모발 성장","두피 순환 저하","모근 약화"], description:"모발 성장 환경을 조성하고 두피 혈행을 촉진하는 샴푸", tag:"모발 성장", color:"#34d399" },
+      { id:"vivacity-refine", brand:"인핸싱 비바시티", name:"밀본 인핸싱 비바시티 샴푸 리파인", price:"38,000원", forTypes:["지성","복합성"], forConditions:["과다 피지","두피 냄새","끈적임","비듬"], description:"두피를 깨끗하게 정돈하고 일상의 생기를 더하는 리파인 샴푸", tag:"세정 · 리파인", color:"#60a5fa" },
+      { id:"vivacity-soften", brand:"인핸싱 비바시티", name:"밀본 인핸싱 비바시티 샴푸 소픈", price:"38,000원", forTypes:["건성","민감성","정상"], forConditions:["두피 건조","두피 당김","수분 부족","각질"], description:"두피에 부드러운 수분감을 더해주는 소픈 타입 샴푸", tag:"수분 · 소픈", color:"#a78bfa" },
+      { id:"carbonated", brand:"글로벌밀본", name:"밀본 카보네이티드 샴푸", price:"45,000원", forTypes:["지성","복합성","정상"], forConditions:["모공 막힘","두피 노폐물","과다 피지","두피 열감"], description:"탄산 성분이 모공 속 노폐물을 효과적으로 제거하는 스파 샴푸", tag:"탄산 클렌징", color:"#fb923c" },
+      { id:"purifying", brand:"글로벌밀본", name:"밀본 퓨어리파잉 젤 샴푸", price:"28,000원", forTypes:["지성","복합성"], forConditions:["과다 피지","비듬","각질","두피 냄새","끈적임"], description:"젤 타입으로 피지와 비듬을 강력하게 세정하는 퓨리파잉 샴푸", tag:"강력 세정", color:"#f87171" },
+    ];
+
+    const SYSTEM_PROMPT = `당신은 전문 두피 분석 전문가입니다. 제공된 두피 사진(1~8장)을 종합 분석하여 두피 상태를 진단해주세요.
+반드시 아래 JSON 형식으로만 응답하세요 (다른 텍스트 없이):
+{"score":0~100사이숫자,"type":"지성/건성/민감성/정상/복합성 중 하나","conditions":["발견된 두피 상태 키워드들. 예:과다 피지,각질,염증,두피 건조,모근 약화,두피 붉음,탈모 징후,모공 막힘,비듬,끈적임,두피 냄새,두피 열감"],"summary":"여러 장 종합 두피 상태 요약 2~3문장","recommendedProductIds":["아래 제품 id 중 맞는 것 1~3개 우선순위 순"],"recommendIngredients":["추천 성분 2~3가지"],"avoidIngredients":["피할 성분 2~3가지"],"cares":[{"title":"케어명","description":"구체적 방법","frequency":"주X회 또는 매일","icon":"이모지"}],"lifestyle":["생활 습관 2~3가지"]}
+제품ID: presedia(오주아 프리세디아/지성피지), fortis(오주아 포르티스/모근강화), moistcalm(오주아 모이스트캄/건성보습), agingspa(오주아 에이징스파/노화), agingspa-clear(오주아 에이징스파클리어폼/딥클렌징), osenam(오주아 오세남/민감염증), growsive(오주아 그로우시브/모발성장), vivacity-refine(비바시티리파인/지성), vivacity-soften(비바시티소픈/건성), carbonated(밀본카보네이티드/탄산클렌징), purifying(밀본퓨어리파잉/강력세정)`;
+
+    const BG="#0c0c14", CARD="rgba(255,255,255,0.03)", BORDER="rgba(255,255,255,0.07)", ACCENT="#7c5cfc", ACCENT2="#a78bfa";
+    const scoreColor = s => s>=80?"#4ade80":s>=60?"#facc15":s>=40?"#fb923c":"#f87171";
+    const scoreLabel = s => s>=80?"매우 건강":s>=60?"양호":s>=40?"주의 필요":"집중 케어 필요";
+
+    function App() {
+      const [photos, setPhotos] = useState([]);
+      const [curIdx, setCurIdx] = useState(0);
+      const [analyzing, setAnalyzing] = useState(false);
+      const [result, setResult] = useState(null);
+      const [error, setError] = useState(null);
+      const [tab, setTab] = useState("overview");
+      const [mode, setMode] = useState("home");
+      const fileRef = useRef(null);
+      const camRef = useRef(null);
+
+      const addPhoto = useCallback((file) => {
+        if (!file || !file.type.startsWith("image/")) return;
+        if (photos.length >= 8) return;
+        const url = URL.createObjectURL(file);
+        const reader = new FileReader();
+        reader.onload = e => {
+          setPhotos(prev => [...prev, { url, base64: e.target.result.split(",")[1], mediaType: file.type }]);
+          setMode("capture");
+        };
+        reader.readAsDataURL(file);
+      }, [photos]);
+
+      const removePhoto = idx => {
+        setPhotos(prev => { const n = prev.filter((_,i)=>i!==idx); if(curIdx>=n.length) setCurIdx(Math.max(0,n.length-1)); return n; });
+      };
+
+      const analyze = async () => {
+        if (!photos.length) return;
+        setAnalyzing(true); setError(null);
+        try {
+          const content = [
+            ...photos.map(p => ({ type:"image", source:{ type:"base64", media_type:p.mediaType, data:p.base64 } })),
+            { type:"text", text:`총 ${photos.length}장의 두피 사진을 종합 분석하고 매장 제품을 추천해주세요.` }
+          ];
+          const res = await fetch("https://api.anthropic.com/v1/messages", {
+            method:"POST", headers:{"Content-Type":"application/json"},
+            body: JSON.stringify({ model:"claude-sonnet-4-20250514", max_tokens:1200, system:SYSTEM_PROMPT, messages:[{role:"user",content}] })
+          });
+          const data = await res.json();
+          const text = data.content?.map(i=>i.text||"").join("")||"";
+          const parsed = JSON.parse(text.replace(/```json|```/g,"").trim());
+          parsed.recommendedProducts = (parsed.recommendedProductIds||[]).map(id=>STORE_PRODUCTS.find(p=>p.id===id)).filter(Boolean);
+          setResult(parsed); setMode("result"); setTab("overview");
+        } catch { setError("분석 중 오류가 발생했습니다. 다시 시도해주세요."); }
+        setAnalyzing(false);
+      };
+
+      const reset = () => { setPhotos([]); setResult(null); setError(null); setCurIdx(0); setMode("home"); };
+
+      const sectionTitle = label => (
+        <h3 style={{fontSize:10,letterSpacing:"0.2em",color:ACCENT2,textTransform:"uppercase",margin:"0 0 12px",fontWeight:700}}>{label}</h3>
+      );
+
+      /* ── HOME ── */
+      if (mode==="home") return (
+        <div style={{minHeight:"100vh",background:BG,color:"#f0ede8",fontFamily:"'Apple SD Gothic Neo','Noto Sans KR',sans-serif",display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",padding:24,position:"relative"}}>
+          <div style={{position:"fixed",inset:0,background:`radial-gradient(ellipse 80% 50% at 50% -10%, rgba(124,92,252,0.12) 0%, transparent 70%)`,pointerEvents:"none"}}/>
+          <div style={{position:"relative",zIndex:1,textAlign:"center",maxWidth:480,width:"100%"}}>
+            <div style={{fontSize:56,marginBottom:20}}>🔬</div>
+            <div style={{display:"inline-flex",alignItems:"center",fontSize:10,letterSpacing:"0.2em",color:ACCENT2,fontWeight:700,padding:"5px 14px",border:`1px solid ${ACCENT2}40`,borderRadius:20,marginBottom:16}}>AI SCALP DIAGNOSIS</div>
+            <h1 style={{fontSize:"clamp(26px,6vw,40px)",fontWeight:800,margin:"0 0 10px",background:`linear-gradient(135deg,#f0ede8,${ACCENT2})`,WebkitBackgroundClip:"text",WebkitTextFillColor:"transparent"}}>두피 AI 진단 리포트</h1>
+            <p style={{color:"#5a5868",fontSize:14,marginBottom:40,lineHeight:1.7}}>두피 사진을 최대 8장 촬영하거나 업로드하면<br/>AI가 종합 분석 후 맞춤 제품을 추천해드려요</p>
+            <div style={{display:"flex",flexDirection:"column",gap:12}}>
+              <button onClick={()=>camRef.current?.click()} style={{padding:18,borderRadius:16,background:`linear-gradient(135deg,${ACCENT},${ACCENT2})`,border:"none",color:"#fff",fontSize:16,fontWeight:700,cursor:"pointer",boxShadow:`0 6px 28px ${ACCENT}50`}}>📷  카메라로 촬영하기</button>
+              <button onClick={()=>fileRef.current?.click()} style={{padding:16,borderRadius:16,background:CARD,border:`1px solid ${BORDER}`,color:"#c8c4d8",fontSize:15,fontWeight:600,cursor:"pointer"}}>🖼  사진 업로드하기</button>
+            </div>
+            <p style={{color:"#3a3848",fontSize:12,marginTop:20}}>최대 8장까지 • 여러 각도 촬영 권장</p>
+          </div>
+          <input ref={camRef} type="file" accept="image/*" capture="environment" style={{display:"none"}} onChange={e=>addPhoto(e.target.files[0])}/>
+          <input ref={fileRef} type="file" accept="image/*" multiple style={{display:"none"}} onChange={e=>Array.from(e.target.files).slice(0,8).forEach(f=>addPhoto(f))}/>
+        </div>
+      );
+
+      /* ── CAPTURE ── */
+      if (mode==="capture") return (
+        <div style={{minHeight:"100vh",background:BG,color:"#f0ede8",fontFamily:"'Apple SD Gothic Neo','Noto Sans KR',sans-serif"}}>
+          <div style={{position:"fixed",inset:0,background:`radial-gradient(ellipse 80% 50% at 50% -10%, rgba(124,92,252,0.08) 0%, transparent 70%)`,pointerEvents:"none"}}/>
+          <div style={{position:"relative",zIndex:1,maxWidth:680,margin:"0 auto",padding:"24px 16px 80px"}}>
+            <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:24}}>
+              <button onClick={reset} style={{background:"none",border:"none",color:"#7a7488",cursor:"pointer",fontSize:13,padding:0}}>← 처음으로</button>
+              <span style={{fontSize:13,color:"#5a5868"}}>사진 {photos.length}/8장</span>
+              <span/>
+            </div>
+
+            {/* 메인 뷰어 */}
+            <div style={{position:"relative",borderRadius:20,overflow:"hidden",background:"#080810",aspectRatio:"4/3",marginBottom:16,boxShadow:"0 8px 40px rgba(0,0,0,0.6)"}}>
+              {photos.length>0 && <img src={photos[curIdx]?.url} alt="두피" style={{width:"100%",height:"100%",objectFit:"cover"}}/>}
+              {photos.length>1 && <>
+                <button onClick={()=>setCurIdx(i=>Math.max(0,i-1))} style={{position:"absolute",left:12,top:"50%",transform:"translateY(-50%)",background:"rgba(0,0,0,0.5)",border:"none",borderRadius:"50%",width:36,height:36,color:"#fff",fontSize:18,cursor:"pointer",opacity:curIdx===0?0.3:1}}>‹</button>
+                <button onClick={()=>setCurIdx(i=>Math.min(photos.length-1,i+1))} style={{position:"absolute",right:12,top:"50%",transform:"translateY(-50%)",background:"rgba(0,0,0,0.5)",border:"none",borderRadius:"50%",width:36,height:36,color:"#fff",fontSize:18,cursor:"pointer",opacity:curIdx===photos.length-1?0.3:1}}>›</button>
+              </>}
+              <div style={{position:"absolute",top:12,right:12,background:"rgba(0,0,0,0.6)",borderRadius:12,padding:"4px 10px",fontSize:12,color:"#fff"}}>{curIdx+1} / {photos.length}</div>
+              <button onClick={()=>removePhoto(curIdx)} style={{position:"absolute",top:12,left:12,background:"rgba(248,113,113,0.85)",border:"none",borderRadius:"50%",width:32,height:32,color:"#fff",fontSize:14,cursor:"pointer"}}>✕</button>
+            </div>
+
+            {/* 썸네일 */}
+            <div style={{display:"flex",gap:8,overflowX:"auto",paddingBottom:8,marginBottom:20}}>
+              {photos.map((p,i)=>(
+                <div key={i} onClick={()=>setCurIdx(i)} style={{flexShrink:0,width:60,height:60,borderRadius:10,overflow:"hidden",border:`2px solid ${i===curIdx?ACCENT2:"transparent"}`,cursor:"pointer",opacity:i===curIdx?1:0.6,transition:"all 0.2s"}}>
+                  <img src={p.url} alt="" style={{width:"100%",height:"100%",objectFit:"cover"}}/>
+                </div>
+              ))}
+              {photos.length<8 && (
+                <div onClick={()=>camRef.current?.click()} style={{flexShrink:0,width:60,height:60,borderRadius:10,border:`2px dashed ${ACCENT2}50`,display:"flex",alignItems:"center",justifyContent:"center",cursor:"pointer",color:ACCENT2,fontSize:22}}>+</div>
+              )}
+            </div>
+
+            <div style={{background:`${ACCENT}10`,border:`1px solid ${ACCENT}30`,borderRadius:14,padding:"12px 16px",marginBottom:20}}>
+              <p style={{color:ACCENT2,fontSize:12,margin:0,lineHeight:1.6}}>💡 <strong>촬영 팁:</strong> 두피 전체, 정수리, 측면, 뒷부분 등 여러 각도에서 찍을수록 더 정확해요</p>
+            </div>
+
+            {photos.length<8 && (
+              <div style={{display:"flex",gap:10,marginBottom:16}}>
+                <button onClick={()=>camRef.current?.click()} style={{flex:1,padding:13,borderRadius:12,background:CARD,border:`1px solid ${BORDER}`,color:"#c8c4d8",fontSize:13,fontWeight:600,cursor:"pointer"}}>📷 추가 촬영</button>
+                <button onClick={()=>fileRef.current?.click()} style={{flex:1,padding:13,borderRadius:12,background:CARD,border:`1px solid ${BORDER}`,color:"#c8c4d8",fontSize:13,fontWeight:600,cursor:"pointer"}}>🖼 추가 업로드</button>
+              </div>
+            )}
+
+            <button onClick={analyze} disabled={analyzing||!photos.length} style={{width:"100%",padding:18,borderRadius:16,background:analyzing?`rgba(124,92,252,0.2)`:`linear-gradient(135deg,${ACCENT},${ACCENT2})`,border:"none",color:"#fff",fontSize:16,fontWeight:700,cursor:analyzing?"not-allowed":"pointer",boxShadow:analyzing?"none":`0 6px 28px ${ACCENT}50`,transition:"all 0.3s"}}>
+              {analyzing
+                ? <span style={{display:"flex",alignItems:"center",justifyContent:"center",gap:10}}><span style={{width:17,height:17,border:"2px solid rgba(255,255,255,0.3)",borderTopColor:"#fff",borderRadius:"50%",display:"inline-block",animation:"spin 0.8s linear infinite"}}/>{photos.length}장 종합 분석 중...</span>
+                : `✨ ${photos.length}장으로 두피 분석하기`}
+            </button>
+            {error && <div style={{marginTop:12,padding:14,borderRadius:12,background:"rgba(248,113,113,0.1)",border:"1px solid rgba(248,113,113,0.2)",color:"#f87171",textAlign:"center",fontSize:13}}>{error}</div>}
+          </div>
+          <input ref={camRef} type="file" accept="image/*" capture="environment" style={{display:"none"}} onChange={e=>addPhoto(e.target.files[0])}/>
+          <input ref={fileRef} type="file" accept="image/*" multiple style={{display:"none"}} onChange={e=>Array.from(e.target.files).slice(0,8-photos.length).forEach(f=>addPhoto(f))}/>
+        </div>
+      );
+
+      /* ── RESULT ── */
+      if (mode==="result" && result) {
+        const sc = result.score;
+        const tabs = [{id:"overview",label:"📊 종합 진단"},{id:"products",label:"🛍 추천 제품"},{id:"care",label:"💊 케어 처방"}];
+        return (
+          <div style={{minHeight:"100vh",background:BG,color:"#f0ede8",fontFamily:"'Apple SD Gothic Neo','Noto Sans KR',sans-serif"}}>
+            <div style={{position:"fixed",inset:0,background:`radial-gradient(ellipse 80% 50% at 50% -10%, rgba(124,92,252,0.08) 0%, transparent 70%)`,pointerEvents:"none"}}/>
+            <div style={{position:"relative",zIndex:1,maxWidth:680,margin:"0 auto",padding:"24px 16px 60px"}}>
+
+              <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:24}}>
+                <button onClick={()=>setMode("capture")} style={{background:"none",border:"none",color:"#7a7488",cursor:"pointer",fontSize:13,padding:0}}>← 사진으로</button>
+                <span style={{fontSize:12,color:"#5a5868"}}>📷 {photos.length}장 분석 완료</span>
+                <button onClick={reset} style={{background:"none",border:`1px solid ${BORDER}`,color:"#a8a4b8",cursor:"pointer",fontSize:12,padding:"5px 12px",borderRadius:10}}>처음으로</button>
+              </div>
+
+              {/* Score */}
+              <div style={{background:`linear-gradient(135deg,rgba(124,92,252,0.1),rgba(167,139,250,0.05))`,border:`1px solid ${ACCENT}30`,borderRadius:22,padding:"28px 24px",marginBottom:16,display:"flex",alignItems:"center",gap:24}}>
+                <div style={{flexShrink:0}}>
+                  <svg width={90} height={90} viewBox="0 0 100 100">
+                    <circle cx={50} cy={50} r={44} fill="none" stroke="rgba(255,255,255,0.06)" strokeWidth={9}/>
+                    <circle cx={50} cy={50} r={44} fill="none" stroke={scoreColor(sc)} strokeWidth={9} strokeDasharray={`${2.76*sc} 276`} strokeLinecap="round" transform="rotate(-90 50 50)"/>
+                    <text x={50} y={46} textAnchor="middle" fill={scoreColor(sc)} fontSize={22} fontWeight={800}>{sc}</text>
+                    <text x={50} y={62} textAnchor="middle" fill="#555" fontSize={9}>/ 100</text>
+                  </svg>
+                </div>
+                <div style={{flex:1}}>
+                  <div style={{display:"flex",flexWrap:"wrap",gap:6,marginBottom:10}}>
+                    <span style={{fontSize:11,fontWeight:700,color:scoreColor(sc),background:`${scoreColor(sc)}18`,padding:"3px 10px",borderRadius:20}}>{scoreLabel(sc)}</span>
+                    <span style={{fontSize:11,fontWeight:700,color:ACCENT2,background:`${ACCENT}18`,padding:"3px 10px",borderRadius:20}}>{result.type} 두피</span>
+                  </div>
+                  <p style={{color:"#a8a4b8",fontSize:13,lineHeight:1.7,margin:0}}>{result.summary}</p>
+                </div>
+              </div>
+
+              {/* Tabs */}
+              <div style={{display:"flex",gap:6,marginBottom:16,background:CARD,border:`1px solid ${BORDER}`,borderRadius:14,padding:5}}>
+                {tabs.map(t=>(
+                  <button key={t.id} onClick={()=>setTab(t.id)} style={{flex:1,padding:"10px 4px",borderRadius:10,border:"none",background:tab===t.id?`linear-gradient(135deg,${ACCENT},${ACCENT2})`:"transparent",color:tab===t.id?"#fff":"#6a6478",fontSize:"clamp(11px,2.5vw,13px)",fontWeight:700,cursor:"pointer",transition:"all 0.2s",whiteSpace:"nowrap"}}>{t.label}</button>
+                ))}
+              </div>
+
+              {/* Tab: Overview */}
+              {tab==="overview" && (
+                <div>
+                  {result.conditions?.length>0 && (
+                    <div style={{background:CARD,border:`1px solid ${BORDER}`,borderRadius:18,padding:"18px 20px",marginBottom:12}}>
+                      {sectionTitle("발견된 두피 상태")}
+                      <div style={{display:"flex",flexWrap:"wrap",gap:6}}>
+                        {result.conditions.map((c,i)=><span key={i} style={{padding:"5px 12px",borderRadius:20,fontSize:12,background:`${ACCENT}12`,border:`1px solid ${ACCENT}30`,color:ACCENT2}}>⚠ {c}</span>)}
+                      </div>
+                    </div>
+                  )}
+                  <div style={{background:CARD,border:`1px solid ${BORDER}`,borderRadius:18,padding:"18px 20px",marginBottom:12}}>
+                    {sectionTitle("성분 가이드")}
+                    <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:12}}>
+                      <div style={{padding:"12px 14px",borderRadius:12,background:"rgba(74,222,128,0.06)",border:"1px solid rgba(74,222,128,0.15)"}}>
+                        <div style={{fontSize:11,color:"#4ade80",fontWeight:700,marginBottom:8}}>✓ 추천 성분</div>
+                        {result.recommendIngredients?.map((s,i)=><div key={i} style={{fontSize:12,color:"#a8d8b0",marginBottom:4}}>• {s}</div>)}
+                      </div>
+                      <div style={{padding:"12px 14px",borderRadius:12,background:"rgba(248,113,113,0.06)",border:"1px solid rgba(248,113,113,0.15)"}}>
+                        <div style={{fontSize:11,color:"#f87171",fontWeight:700,marginBottom:8}}>✗ 피할 성분</div>
+                        {result.avoidIngredients?.map((s,i)=><div key={i} style={{fontSize:12,color:"#d8a8a8",marginBottom:4}}>• {s}</div>)}
+                      </div>
+                    </div>
+                  </div>
+                  {result.lifestyle?.length>0 && (
+                    <div style={{background:CARD,border:`1px solid ${BORDER}`,borderRadius:18,padding:"18px 20px"}}>
+                      {sectionTitle("생활 습관 조언")}
+                      {result.lifestyle.map((l,i)=>(
+                        <div key={i} style={{display:"flex",gap:10,marginBottom:i<result.lifestyle.length-1?10:0}}>
+                          <span style={{color:ACCENT2,fontWeight:700,fontSize:12,flexShrink:0,marginTop:1}}>0{i+1}</span>
+                          <span style={{color:"#9490a4",fontSize:13,lineHeight:1.6}}>{l}</span>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              )}
+
+              {/* Tab: Products */}
+              {tab==="products" && (
+                <div>
+                  {result.recommendedProducts?.length>0
+                    ? result.recommendedProducts.map((p,i)=>(
+                      <div key={p.id} style={{background:i===0?`linear-gradient(135deg,rgba(124,92,252,0.1),rgba(167,139,250,0.05))`:CARD,border:i===0?`1px solid ${ACCENT}35`:`1px solid ${BORDER}`,borderRadius:18,padding:"18px",marginBottom:12,display:"flex",gap:14,alignItems:"flex-start"}}>
+                        <div style={{width:42,height:42,borderRadius:12,background:i===0?`${ACCENT}25`:"rgba(255,255,255,0.05)",display:"flex",alignItems:"center",justifyContent:"center",fontSize:18,flexShrink:0}}>{i===0?"🥇":i===1?"🥈":"🥉"}</div>
+                        <div style={{flex:1}}>
+                          <div style={{fontSize:10,color:"#6b6478",fontWeight:600,marginBottom:4}}>{p.brand}</div>
+                          <div style={{display:"flex",alignItems:"center",gap:8,flexWrap:"wrap",marginBottom:5}}>
+                            <span style={{fontSize:15,fontWeight:700,color:"#f0ede8"}}>{p.name}</span>
+                            <span style={{fontSize:10,padding:"2px 9px",borderRadius:10,fontWeight:700,background:`${p.color}18`,color:p.color,border:`1px solid ${p.color}30`}}>{p.tag}</span>
+                          </div>
+                          <p style={{color:"#7a7488",fontSize:12,lineHeight:1.6,margin:"0 0 6px"}}>{p.description}</p>
+                          <span style={{fontSize:13,fontWeight:700,color:ACCENT2}}>{p.price}</span>
+                        </div>
+                      </div>
+                    ))
+                    : <div style={{textAlign:"center",color:"#5a5868",padding:"40px 0"}}>추천 제품 없음</div>
+                  }
+                </div>
+              )}
+
+              {/* Tab: Care */}
+              {tab==="care" && (
+                <div>
+                  {result.cares?.map((care,i)=>(
+                    <div key={i} style={{background:CARD,border:`1px solid ${BORDER}`,borderRadius:16,padding:"15px 17px",marginBottom:10,display:"flex",gap:12}}>
+                      <div style={{fontSize:24,width:42,height:42,display:"flex",alignItems:"center",justifyContent:"center",background:"rgba(255,255,255,0.04)",borderRadius:11,flexShrink:0}}>{care.icon}</div>
+                      <div style={{flex:1}}>
+                        <div style={{fontSize:13,fontWeight:700,color:"#e8e4f0",marginBottom:4}}>{care.title}</div>
+                        <p style={{color:"#7a7488",fontSize:12,lineHeight:1.6,margin:"0 0 5px"}}>{care.description}</p>
+                        <span style={{fontSize:11,color:ACCENT2,fontWeight:600}}>🗓 {care.frequency}</span>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+
+              <p style={{textAlign:"center",color:"#252330",fontSize:11,marginTop:24}}>본 진단은 참고용이며 전문 의료 상담을 대체하지 않습니다</p>
+            </div>
+          </div>
+        );
+      }
+      return null;
+    }
+
+    const root = ReactDOM.createRoot(document.getElementById("root"));
+    root.render(<App/>);
+  </script>
+  <style>
+    @keyframes spin { to { transform: rotate(360deg); } }
+    ::-webkit-scrollbar { display: none; }
+  </style>
+</body>
+</html>
