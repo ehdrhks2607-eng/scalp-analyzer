@@ -70,11 +70,24 @@ function el(tag, attrs, ...children) {
 function addPhoto(file) {
   if(!file||!file.type.startsWith("image/")||state.photos.length>=8) return;
   const url=URL.createObjectURL(file);
-  const reader=new FileReader();
-  reader.onload=e=>{
-    setState({photos:[...state.photos,{url,base64:e.target.result.split(",")[1],mediaType:file.type}], mode:"capture", curIdx:state.photos.length});
+  // 이미지 압축 (최대 1200px, 품질 0.8)
+  const img=new Image();
+  img.onload=()=>{
+    const MAX=1200;
+    let w=img.width, h=img.height;
+    if(w>MAX||h>MAX){
+      if(w>h){h=Math.round(h*MAX/w);w=MAX;}
+      else{w=Math.round(w*MAX/h);h=MAX;}
+    }
+    const canvas=document.createElement("canvas");
+    canvas.width=w; canvas.height=h;
+    const ctx=canvas.getContext("2d");
+    ctx.drawImage(img,0,0,w,h);
+    const compressed=canvas.toDataURL("image/jpeg",0.8);
+    const base64=compressed.split(",")[1];
+    setState({photos:[...state.photos,{url,base64,mediaType:"image/jpeg"}], mode:"capture", curIdx:state.photos.length});
   };
-  reader.readAsDataURL(file);
+  img.src=url;
 }
 
 function removePhoto(idx) {
