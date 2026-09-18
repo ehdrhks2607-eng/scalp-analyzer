@@ -1,0 +1,1403 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8"/>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>두피 AI 진단 · 메종드아이디헤어 반포자이점</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body { background: #faf7f2; color: #2b2721; font-family: 'Apple SD Gothic Neo','Noto Sans KR',sans-serif; -webkit-text-size-adjust:100%; }
+    @keyframes spin { to { transform: rotate(360deg); } }
+    @keyframes fadeUp { from { opacity:0; transform:translateY(14px); } to { opacity:1; transform:translateY(0); } }
+    ::-webkit-scrollbar { width: 4px; height: 4px; }
+    ::-webkit-scrollbar-thumb { background: rgba(63,143,99,0.35); border-radius: 4px; }
+    .fade { animation: fadeUp 0.35s ease; }
+    .spin { animation: spin 0.8s linear infinite; }
+    input, select, button { font-family: inherit; }
+    input:focus, select:focus { outline: 1px solid rgba(63,143,99,0.55); }
+  </style>
+</head>
+<body>
+<div id="app"></div>
+<script>
+/* ═══════════════════════════════════════════════════════════
+   메종드아이디헤어 반포자이점 · 두피 AI 진단 + 더조각 회차 관리
+   ─ 수정하기 쉬운 값은 전부 아래 상수에 모아두었습니다 ─
+   ═══════════════════════════════════════════════════════════ */
+
+const SALON = {
+  name: "메종드아이디헤어 반포자이점",
+  tag: "SCALP CARE REPORT",
+  logo: null,   // 로고 파일 받으면 여기에 "logo.png" 경로만 넣으면 리포트에 자동 표시
+};
+
+// 담당 디자이너 (매장 명단 순서: 원장 → 부원장 → 수석실장 → 실장 → 스타일리스트)
+const DESIGNERS_DEFAULT = ["보배","청아","연우","최고","청림","선우","승철","이안","지유","이윤"];
+let DESIGNERS = [...DESIGNERS_DEFAULT];
+
+// 관리자 PIN — 관리자 화면에서 변경할 수 있습니다
+let ADMIN_PIN = "1234";
+
+// 촬영 부위 3곳 고정 — 회차 비교의 핵심
+const REGIONS = [
+  { id:"top",      label:"정수리",   icon:"🔝", tip:"가르마 중심을 위에서 수직으로" },
+  { id:"hairline", label:"헤어라인", icon:"🙂", tip:"이마 앞머리 경계선 정면" },
+  { id:"back",     label:"후두부",   icon:"🔄", tip:"뒤통수 중앙, 정수리 아래쪽" },
+];
+
+// 6개 항목 · 총점 가중치 (합계 1.0) — 점수는 AI가 아니라 이 코드가 계산합니다
+const METRICS = [
+  { key:"sebum",        label:"피지",      w:0.18 },
+  { key:"pore",         label:"모공",      w:0.15 },
+  { key:"dandruff",     label:"각질",      w:0.15 },
+  { key:"inflammation", label:"염증",      w:0.17 },
+  { key:"hairLoss",     label:"탈모 징후", w:0.20 },
+  { key:"moisture",     label:"유수분",    w:0.15 },
+];
+const GRADE_TEXT = ["매우 양호","양호","보통","주의","집중 관리"];
+
+// ── 더조각 테라피 플랜 ──────────────────────────────────────
+// ⚠️ 금액은 정가 180,000원 기준 할인율(10% / 20% / 30%)로 계산한 값입니다.
+//    확정 금액이 다르면 price · per 숫자만 고치면 화면 전체에 반영됩니다.
+let SINGLE_PRICE = 180000;
+const PLANS_DEFAULT = {
+  start: {
+    code:"start", name:"더조각 스타트", period:"6주 플랜", rounds:4, weeks:6,
+    price:648000, per:162000, off:10, gift:null,
+    note:"6주 안에 4회 진행 · 기간 내 미사용분은 소멸",
+    for:"지금 컨디션을 유지하며 관리 리듬을 잡는 단계",
+  },
+  signature: {
+    code:"signature", name:"더조각 시그니처", period:"12주 플랜", rounds:12, weeks:12,
+    price:1728000, per:144000, off:20, gift:"더조각 스켈프 샴푸 (68,000원 상당)",
+    note:"사용 기간 제한 없음",
+    for:"피지·각질이 반복되는 두피 환경을 바꾸는 단계",
+  },
+  premium: {
+    code:"premium", name:"더조각 프리미엄", period:"24주 플랜", rounds:24, weeks:24,
+    price:3024000, per:126000, off:30, gift:"더조각 스켈프 샴푸 + 스케일링제 (136,000원 상당)",
+    note:"사용 기간 제한 없음",
+    for:"탈모 고민·두피 탄력까지 장기로 잡아야 하는 단계",
+  },
+};
+let PLANS = JSON.parse(JSON.stringify(PLANS_DEFAULT));
+
+const PROMPT = `당신은 두피 관리 전문가입니다. 제공된 두피 사진(정수리·헤어라인·후두부)을 분석해 아래 JSON만 반환하세요. 설명이나 마크다운 없이 JSON만 출력합니다.
+{"grades":{"sebum":2,"pore":2,"dandruff":1,"inflammation":0,"hairLoss":1,"moisture":2},"type":"지성","detailedType":"지성-복합성 두피","conditions":["과다 피지","모공 막힘"],"summary":"두피 상태 종합 소견 3~4문장","diagnosis":"원인과 진행 방향 2~3문장","recommendIngredients":["살리실산 - 피지 조절","판테놀 - 두피 진정"],"avoidIngredients":["고농도 설페이트 - 과도한 세정"],"cares":[{"title":"두피 세정","description":"구체적인 방법","frequency":"매일","icon":"🧴","priority":1}],"lifestyle":["생활습관 조언"]}
+
+grades 규칙 — 6개 항목 모두 0~4 사이 정수만 사용합니다.
+0=매우 양호, 1=양호, 2=보통, 3=주의, 4=집중 관리 필요.
+moisture는 값이 클수록 건조하거나 유수분 균형이 무너진 상태를 뜻합니다.
+사진으로 판단이 어려운 항목은 2를 사용합니다.
+과거 회차와 비교하지 말고 이번 사진만으로 독립적으로 평가합니다.
+
+표현 규칙 — 질병·치료·처방·진료를 연상시키는 단어는 쓰지 않고, '두피 환경 관리' 관점으로 서술합니다.
+conditions 2~4개, recommendIngredients 2~3개, avoidIngredients 1~2개, cares 3~4개, lifestyle 3개.`;
+
+/* ── 테마 ──────────────────────────────────────────────── */
+const AC="#3f8f63", AC2="#2c6f4b", BG="#faf7f2", CARD="#ffffff", BD="#e6e0d5";
+const scoreColor = s => s>=80?"#2f9e5f":s>=60?"#c08a00":s>=40?"#dd7a33":"#d35454";
+const scoreLabel = s => s>=80?"매우 건강":s>=60?"양호":s>=40?"관리 필요":"집중 관리 필요";
+const gradeOf = s => s>=85?"A+":s>=75?"A":s>=65?"B":s>=55?"C":s>=45?"D":"E";
+
+/* ── 상태 ──────────────────────────────────────────────── */
+let state = {
+  mode:"home",
+  cust:{ name:"", phone4:"", designer:"", agree:false },
+  history:[],            // 이 고객의 과거 회차
+  photos:{},             // { top:{url,base64}, hairline:..., back:... }
+  activeRegion:"top",
+  overlay:true,
+  analyzing:false,
+  result:null,
+  error:null,
+  tab:"overview",
+  saving:false,
+  toast:null,
+  enrolled:null,                 // 이 고객이 실제 등록한 플랜
+  admin:{ authed:false, tab:"designers", q:"", results:[], sel:null, selSessions:[], busy:false },
+};
+function setState(p){ state={...state,...p}; render(); }
+function toast(msg){ setState({toast:msg}); setTimeout(()=>setState({toast:null}),2200); }
+
+function el(tag, attrs, ...children){
+  const e=document.createElement(tag);
+  if(attrs) Object.entries(attrs).forEach(([k,v])=>{
+    if(v==null||v===false) return;
+    if(k==="style"&&typeof v==="object") Object.assign(e.style,v);
+    else if(k.startsWith("on")) e.addEventListener(k.slice(2).toLowerCase(),v);
+    else if(k==="class") e.className=v;
+    else e.setAttribute(k,v);
+  });
+  children.flat().forEach(c=>c!=null&&c!==false&&e.appendChild(typeof c==="string"?document.createTextNode(c):c));
+  return e;
+}
+
+/* ── 날짜 ──────────────────────────────────────────────── */
+const WD=["일","월","화","수","목","금","토"];
+function fmtDate(d){ return `${d.getFullYear()}.${String(d.getMonth()+1).padStart(2,"0")}.${String(d.getDate()).padStart(2,"0")}(${WD[d.getDay()]})`; }
+function addDays(d,n){ const x=new Date(d.getTime()); x.setDate(x.getDate()+n); return x; }
+
+/* ── 점수 계산 (AI가 아니라 여기서) ────────────────────── */
+function clampGrade(v){ const n=Math.round(Number(v)); return isNaN(n)?2:Math.max(0,Math.min(4,n)); }
+function normalizeGrades(g){
+  const out={}; METRICS.forEach(m=>out[m.key]=clampGrade(g?.[m.key])); return out;
+}
+function totalScore(grades){
+  const penalty=METRICS.reduce((s,m)=>s+m.w*grades[m.key],0);  // 0~4
+  return Math.round(100-penalty*25);
+}
+
+/* ── 더조각 플랜 추천 ──────────────────────────────────── */
+function recommendPlan(grades, score){
+  const heavy = grades.hairLoss>=3 || grades.inflammation>=3;
+  if(heavy || score<50) return PLANS.premium;
+  if(score<70 || METRICS.some(m=>grades[m.key]>=3)) return PLANS.signature;
+  return PLANS.start;
+}
+const won = n => n.toLocaleString("ko-KR")+"원";
+
+/* ── 기록 저장 (지금은 브라우저 저장 · Supabase 키 넣으면 서버로) ── */
+const LS_KEY="idhair_scalp_history_v1";
+const custKey = c => `${c.name.trim()}_${c.phone4.trim()}`;
+
+function loadAll(){ try { return JSON.parse(localStorage.getItem(LS_KEY)||"{}"); } catch(e){ return {}; } }
+function saveAll(db){
+  try { localStorage.setItem(LS_KEY, JSON.stringify(db)); return true; }
+  catch(e){
+    // 용량 초과 시 가장 오래된 고객 기록부터 정리
+    const keys=Object.keys(db);
+    if(keys.length>1){ delete db[keys[0]]; return saveAll(db); }
+    return false;
+  }
+}
+function getHistory(c){ const db=loadAll(); return db[custKey(c)]?.sessions||[]; }
+
+/* ── 매장 설정 (디자이너 명단 · 플랜 가격 · 관리자 PIN) ──
+   Supabase에 저장해 모든 기기에서 같은 값을 씁니다.
+   서버가 없으면 이 기기 브라우저에만 저장됩니다.            */
+const SET_KEY="idhair_scalp_settings_v1";
+
+function applySettings(obj){
+  if(!obj) return;
+  if(Array.isArray(obj.designers) && obj.designers.length) DESIGNERS=obj.designers;
+  if(obj.plans) Object.keys(PLANS).forEach(k=>{ if(obj.plans[k]) PLANS[k]={...PLANS[k],...obj.plans[k]}; });
+  if(obj.singlePrice) SINGLE_PRICE=obj.singlePrice;
+  if(obj.pin) ADMIN_PIN=String(obj.pin);
+}
+function localSettings(){ try{ return JSON.parse(localStorage.getItem(SET_KEY)||"null"); }catch(e){ return null; } }
+
+async function loadSettings(){
+  applySettings(localSettings());
+  try{
+    const res=await fetch("/api/session",{
+      method:"POST", headers:{"Content-Type":"application/json"},
+      body:JSON.stringify({ action:"getSettings" })
+    });
+    if(res.ok){
+      const j=await res.json();
+      if(j.settings){ applySettings(j.settings); try{ localStorage.setItem(SET_KEY,JSON.stringify(j.settings)); }catch(e){} }
+    }
+  }catch(e){}
+}
+
+async function saveSettings(){
+  const payload={
+    designers: DESIGNERS,
+    plans: Object.fromEntries(Object.entries(PLANS).map(([k,v])=>[k,{name:v.name,period:v.period,rounds:v.rounds,price:v.price,per:v.per,off:v.off,gift:v.gift,note:v.note,for:v.for}])),
+    singlePrice: SINGLE_PRICE,
+    pin: ADMIN_PIN,
+  };
+  try{ localStorage.setItem(SET_KEY,JSON.stringify(payload)); }catch(e){}
+  try{
+    const res=await fetch("/api/session",{
+      method:"POST", headers:{"Content-Type":"application/json"},
+      body:JSON.stringify({ action:"saveSettings", settings:payload })
+    });
+    return res.ok;
+  }catch(e){ return false; }
+}
+
+// 서버(Supabase)에 기록이 있으면 그쪽을 우선 사용하고, 없거나 미설정이면 브라우저 저장분을 씁니다
+async function loadHistory(c){
+  const local=getHistory(c);
+  try{
+    const res=await fetch("/api/session",{
+      method:"POST", headers:{"Content-Type":"application/json"},
+      body:JSON.stringify({ action:"history", customer:{ name:c.name, phone4:c.phone4 } })
+    });
+    if(res.ok){
+      const j=await res.json();
+      state.enrolled = j.enrolled || null;
+      if(Array.isArray(j.sessions) && j.sessions.length){
+        return j.sessions.map(s=>({
+          date:s.taken_at, dateText:fmtDate(new Date(s.taken_at)), designer:s.designer,
+          grades:normalizeGrades(s.grades), score:s.score, grade:s.grade,
+          type:s.scalp_type, detailedType:s.detailed_type, conditions:s.conditions||[],
+          summary:s.summary||"", diagnosis:s.diagnosis||"",
+          recommendIngredients:s.recommend_ingredients||[], avoidIngredients:s.avoid_ingredients||[],
+          cares:s.cares||[], lifestyle:s.lifestyle||[],
+          planCode:s.plan_code, round:s.round, thumbs:s.photoUrls||{},
+        }));
+      }
+    }
+  }catch(e){ /* 미설정 · 오프라인이면 로컬 사용 */ }
+  return local;
+}
+
+async function shrink(dataUrl, max, q){
+  return new Promise(res=>{
+    const img=new Image();
+    img.onload=()=>{
+      let w=img.width,h=img.height;
+      if(w>max||h>max){ if(w>h){h=Math.round(h*max/w);w=max;} else {w=Math.round(w*max/h);h=max;} }
+      const cv=document.createElement("canvas"); cv.width=w; cv.height=h;
+      cv.getContext("2d").drawImage(img,0,0,w,h);
+      res(cv.toDataURL("image/jpeg",q));
+    };
+    img.onerror=()=>res(dataUrl);
+    img.src=dataUrl;
+  });
+}
+
+async function saveSession(entry){
+  // 1) 브라우저에 저장 (썸네일로 축소해 용량 관리)
+  const thumbs={};
+  for(const r of REGIONS){
+    const p=state.photos[r.id];
+    if(p) thumbs[r.id]=await shrink("data:image/jpeg;base64,"+p.base64, 420, 0.5);
+  }
+  const db=loadAll();
+  const key=custKey(state.cust);
+  if(!db[key]) db[key]={ name:state.cust.name, phone4:state.cust.phone4, sessions:[] };
+  db[key].designer=state.cust.designer;
+  db[key].sessions.push({ ...entry, thumbs });
+  saveAll(db);
+
+  // 2) 서버(Supabase)에도 시도 — 키가 없으면 조용히 건너뜁니다
+  try{
+    const res=await fetch("/api/session",{
+      method:"POST", headers:{"Content-Type":"application/json"},
+      body:JSON.stringify({
+        action:"save",
+        customer:{ name:state.cust.name, phone4:state.cust.phone4, designer:state.cust.designer },
+        session:{ ...entry },
+        photos:Object.fromEntries(REGIONS.filter(r=>state.photos[r.id]).map(r=>[r.id,state.photos[r.id].base64])),
+      })
+    });
+    if(res.ok) return { remote:true, thumbs };
+  }catch(e){ /* 로컬 저장만으로 진행 */ }
+  return { remote:false, thumbs };
+}
+
+/* ── 사진 ──────────────────────────────────────────────── */
+function addPhoto(file, regionId){
+  if(!file||!file.type.startsWith("image/")) return;
+  const url=URL.createObjectURL(file);
+  const img=new Image();
+  img.onload=()=>{
+    const MAX=900;
+    let w=img.width,h=img.height;
+    if(w>MAX||h>MAX){ if(w>h){h=Math.round(h*MAX/w);w=MAX;} else {w=Math.round(w*MAX/h);h=MAX;} }
+    const cv=document.createElement("canvas"); cv.width=w; cv.height=h;
+    cv.getContext("2d").drawImage(img,0,0,w,h);
+    const base64=cv.toDataURL("image/jpeg",0.65).split(",")[1];
+    setState({ photos:{...state.photos,[regionId]:{url,base64}}, activeRegion:regionId });
+  };
+  img.src=url;
+}
+const photoCount = () => REGIONS.filter(r=>state.photos[r.id]).length;
+
+/* ── 분석 ──────────────────────────────────────────────── */
+async function analyze(){
+  if(photoCount()===0) return;
+  setState({analyzing:true,error:null});
+  try{
+    const parts=[];
+    REGIONS.forEach(r=>{
+      const p=state.photos[r.id];
+      if(p){ parts.push({text:`[${r.label} 부위 사진]`}); parts.push({inlineData:{mimeType:"image/jpeg",data:p.base64}}); }
+    });
+    parts.push({text:PROMPT});
+    const res=await fetch("/api/analyze",{
+      method:"POST", headers:{"Content-Type":"application/json"},
+      body:JSON.stringify({ contents:[{parts}], generationConfig:{temperature:0.1,maxOutputTokens:30000,responseMimeType:"application/json"} })
+    });
+    const data=await res.json();
+    if(data.error){ setState({error:`API 오류: ${data.error.message||data.error}`,analyzing:false}); return; }
+    let text=data.candidates?.[0]?.content?.parts?.[0]?.text||"";
+    text=text.replace(/```json|```/g,"").trim();
+    let parsed=null;
+    try{ parsed=JSON.parse(text); }
+    catch(e){
+      const s=text.indexOf("{"), e2=text.lastIndexOf("}");
+      if(s!==-1&&e2!==-1){ try{ parsed=JSON.parse(text.slice(s,e2+1)); }catch(_){} }
+    }
+    if(!parsed){ setState({error:"분석 결과를 읽을 수 없습니다. 다시 시도해주세요.",analyzing:false}); return; }
+
+    const grades=normalizeGrades(parsed.grades);
+    const score=totalScore(grades);
+    const plan=recommendPlan(grades,score);
+    const now=new Date();
+    const entry={
+      date: now.toISOString(),
+      dateText: fmtDate(now),
+      designer: state.cust.designer,
+      grades, score, grade:gradeOf(score),
+      type: parsed.type||"", detailedType: parsed.detailedType||"",
+      conditions: parsed.conditions||[],
+      summary: parsed.summary||"", diagnosis: parsed.diagnosis||"",
+      recommendIngredients: parsed.recommendIngredients||[],
+      avoidIngredients: parsed.avoidIngredients||[],
+      cares: parsed.cares||[], lifestyle: parsed.lifestyle||[],
+      planCode: plan.code,
+      round: state.history.length+1,
+    };
+    const saved=await saveSession(entry);
+    setState({ result:entry, history:[...state.history, {...entry, thumbs:saved.thumbs}], mode:"result", tab:"overview", analyzing:false });
+  }catch(e){
+    setState({error:`오류: ${e.message}`,analyzing:false});
+  }
+}
+
+/* ── 공통 UI ───────────────────────────────────────────── */
+function sectionTitle(t){ return el("h3",{style:{fontSize:"10px",letterSpacing:"0.2em",color:AC2,textTransform:"uppercase",margin:"0 0 14px",fontWeight:700}},t); }
+function card(children,extra={}){
+  const d=el("div",{style:{background:CARD,border:`1px solid ${BD}`,borderRadius:"18px",padding:"18px 20px",marginBottom:"14px",...extra}});
+  (Array.isArray(children)?children:[children]).forEach(c=>c&&d.appendChild(c));
+  return d;
+}
+function bgGlow(op){ return el("div",{style:{position:"fixed",inset:0,background:`radial-gradient(ellipse 80% 50% at 50% -10%, rgba(79,169,123,${op}) 0%, transparent 70%)`,pointerEvents:"none"}}); }
+
+function render(){
+  const app=document.getElementById("app");
+  app.innerHTML="";
+  if(state.mode==="home") app.appendChild(buildHome());
+  else if(state.mode==="capture") app.appendChild(buildCapture());
+  else if(state.mode==="result") app.appendChild(buildResult());
+  else if(state.mode==="admin") app.appendChild(buildAdmin());
+  if(state.toast) app.appendChild(el("div",{style:{position:"fixed",left:"50%",bottom:"28px",transform:"translateX(-50%)",background:"rgba(20,20,28,0.95)",border:`1px solid ${AC}28`,color:"#e8f5ee",padding:"12px 20px",borderRadius:"14px",fontSize:"13px",zIndex:999,boxShadow:"0 8px 30px rgba(0,0,0,0.5)"}},state.toast));
+}
+
+/* ── 화면 1. 고객 정보 ─────────────────────────────────── */
+function buildHome(){
+  const wrap=el("div",{style:{minHeight:"100vh",background:BG,padding:"24px 16px 60px"}});
+  wrap.appendChild(bgGlow(0.12));
+  const inner=el("div",{style:{position:"relative",zIndex:1,maxWidth:"480px",margin:"0 auto"}});
+
+  inner.appendChild(el("div",{style:{textAlign:"center",marginBottom:"28px",paddingTop:"24px"}},[
+    el("div",{style:{fontSize:"46px",marginBottom:"14px"}},"🔬"),
+    el("div",{style:{display:"inline-flex",fontSize:"9px",letterSpacing:"0.2em",color:AC2,fontWeight:700,padding:"5px 14px",border:`1px solid ${AC2}40`,borderRadius:"20px",marginBottom:"14px"}},SALON.tag),
+    el("h1",{style:{fontSize:"clamp(23px,5.5vw,32px)",fontWeight:800,margin:"0 0 8px",background:`linear-gradient(135deg,#2b2721,${AC})`,WebkitBackgroundClip:"text",WebkitTextFillColor:"transparent"}},"두피 AI 진단 리포트"),
+    el("p",{style:{color:"#9a9184",fontSize:"12px"}},SALON.name),
+  ]));
+
+  const field=(label,node)=>el("div",{style:{marginBottom:"14px"}},[
+    el("label",{style:{display:"block",fontSize:"11px",color:"#7a7266",fontWeight:600,marginBottom:"7px"}},label), node
+  ]);
+  const inputStyle={width:"100%",padding:"14px 16px",borderRadius:"13px",background:"#f3efe7",border:`1px solid ${BD}`,color:"#2b2721",fontSize:"15px"};
+
+  const nameIn=el("input",{type:"text",placeholder:"고객 성함",value:state.cust.name,style:inputStyle});
+  nameIn.addEventListener("input",e=>{ state.cust.name=e.target.value; });
+  const phoneIn=el("input",{type:"tel",inputmode:"numeric",maxlength:"4",placeholder:"연락처 뒤 4자리",value:state.cust.phone4,style:inputStyle});
+  phoneIn.addEventListener("input",e=>{ e.target.value=e.target.value.replace(/\D/g,"").slice(0,4); state.cust.phone4=e.target.value; });
+
+  const sel=el("select",{style:{...inputStyle,appearance:"none"}});
+  sel.appendChild(el("option",{value:""},"담당 디자이너 선택"));
+  DESIGNERS.forEach(d=>{
+    const o=el("option",{value:d},d);
+    if(state.cust.designer===d) o.setAttribute("selected","selected");
+    sel.appendChild(o);
+  });
+  const etcOpt=el("option",{value:"__etc"},"직접 입력");
+  sel.appendChild(etcOpt);
+  const etcIn=el("input",{type:"text",placeholder:"디자이너 이름 입력",style:{...inputStyle,marginTop:"8px",display:DESIGNERS.includes(state.cust.designer)||!state.cust.designer?"none":"block"},value:DESIGNERS.includes(state.cust.designer)?"":state.cust.designer});
+  etcIn.addEventListener("input",e=>{ state.cust.designer=e.target.value; });
+  sel.addEventListener("change",e=>{
+    if(e.target.value==="__etc"){ etcIn.style.display="block"; state.cust.designer=etcIn.value; etcIn.focus(); }
+    else { etcIn.style.display="none"; state.cust.designer=e.target.value; }
+  });
+
+  inner.appendChild(field("고객 성함",nameIn));
+  inner.appendChild(field("연락처 뒤 4자리",phoneIn));
+  inner.appendChild(field("담당 디자이너",el("div",{},[sel,etcIn])));
+
+  // 동의
+  const agreeBox=el("div",{style:{display:"flex",gap:"10px",alignItems:"flex-start",padding:"14px 16px",borderRadius:"13px",background:"#faf8f4",border:`1px solid ${BD}`,marginBottom:"18px",cursor:"pointer"}});
+  const chk=el("div",{style:{width:"20px",height:"20px",borderRadius:"6px",flexShrink:0,marginTop:"1px",border:`1px solid ${state.cust.agree?AC:"#c9c0b3"}`,background:state.cust.agree?AC:"transparent",display:"flex",alignItems:"center",justifyContent:"center",fontSize:"12px",color:"#fff"}},state.cust.agree?"✓":"");
+  agreeBox.append(chk,el("p",{style:{fontSize:"11.5px",color:"#7a7266",lineHeight:1.6,margin:0}},"두피 사진과 진단 기록을 회차 비교 목적으로 저장하는 데 동의합니다. 요청하시면 언제든 삭제해 드립니다."));
+  agreeBox.addEventListener("click",()=>{ state.cust.agree=!state.cust.agree; render(); });
+  inner.appendChild(agreeBox);
+
+  // 이전 기록 미리보기
+  if(state.cust.name && state.cust.phone4.length===4){
+    const h=getHistory(state.cust);
+    if(h.length){
+      const last=h[h.length-1];
+      inner.appendChild(el("div",{style:{padding:"14px 16px",borderRadius:"13px",background:`${AC}0f`,border:`1px solid ${AC}30`,marginBottom:"16px"}},[
+        el("p",{style:{fontSize:"12px",color:AC2,fontWeight:700,marginBottom:"4px"}},`${state.cust.name}님 · ${h.length+1}회차 진행 예정`),
+        el("p",{style:{fontSize:"11px",color:"#7a7266"}},`직전 진단 ${last.dateText} · ${last.score}점 (${last.grade})`),
+      ]));
+    }
+  }
+
+  const start=el("button",{style:{width:"100%",padding:"17px",borderRadius:"15px",background:`linear-gradient(135deg,${AC},${AC2})`,border:"none",color:"#ffffff",fontSize:"15px",fontWeight:800,cursor:"pointer",boxShadow:`0 6px 26px ${AC}28`}},"진단 시작하기");
+  start.addEventListener("click",async()=>{
+    if(!state.cust.name.trim()) return toast("고객 성함을 입력해주세요");
+    if(state.cust.phone4.length!==4) return toast("연락처 뒤 4자리를 입력해주세요");
+    if(!state.cust.designer) return toast("담당 디자이너를 선택해주세요");
+    if(!state.cust.agree) return toast("사진 저장 동의가 필요합니다");
+    start.textContent="기록 불러오는 중...";
+    const history=await loadHistory(state.cust);
+    setState({ mode:"capture", history, photos:{}, activeRegion:"top", result:null, error:null });
+  });
+  inner.appendChild(start);
+  inner.appendChild(el("p",{style:{textAlign:"center",color:"#a89e90",fontSize:"10.5px",marginTop:"18px",lineHeight:1.6}},"본 진단은 두피 환경 관리를 위한 참고 자료이며\n의료적 진단이나 치료를 대체하지 않습니다"));
+
+  // 관리자 진입
+  const adminBtn=el("button",{style:{display:"block",margin:"22px auto 0",background:"none",border:"none",color:"#c5bcaf",fontSize:"11px",cursor:"pointer",padding:"6px 12px"}},"⚙ 관리자");
+  adminBtn.addEventListener("click",()=>{
+    const pin=prompt("관리자 PIN을 입력하세요");
+    if(pin===null) return;
+    if(pin!==ADMIN_PIN) return toast("PIN이 올바르지 않습니다");
+    setState({ mode:"admin", admin:{...state.admin, authed:true, tab:"designers"} });
+  });
+  inner.appendChild(adminBtn);
+
+  wrap.appendChild(inner);
+  return wrap;
+}
+
+/* ── 화면 2. 3부위 촬영 ────────────────────────────────── */
+function buildCapture(){
+  const wrap=el("div",{style:{minHeight:"100vh",background:BG}});
+  wrap.appendChild(bgGlow(0.08));
+  const inner=el("div",{style:{position:"relative",zIndex:1,maxWidth:"680px",margin:"0 auto",padding:"22px 16px 40px"}});
+
+  const prev = state.history.length ? state.history[state.history.length-1] : null;
+
+  inner.appendChild(el("div",{style:{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:"18px"}},[
+    el("button",{style:{background:"none",border:"none",color:"#857d71",cursor:"pointer",fontSize:"13px",padding:0},onClick:()=>setState({mode:"home",photos:{}})},"← 고객 정보"),
+    el("span",{style:{fontSize:"12px",color:"#9a9184"}},`${state.cust.name}님 · ${state.history.length+1}회차`),
+    el("span",{style:{fontSize:"12px",color:AC2,fontWeight:700}},`${photoCount()}/3`),
+  ]));
+
+  // 뷰어
+  const active=state.activeRegion;
+  const cur=state.photos[active];
+  const prevThumb=prev?.thumbs?.[active];
+  const viewer=el("div",{style:{position:"relative",borderRadius:"20px",overflow:"hidden",background:"#eee9e0",aspectRatio:"4/3",marginBottom:"12px",border:`1px solid ${BD}`}});
+  if(cur){
+    viewer.appendChild(el("img",{src:cur.url,style:{width:"100%",height:"100%",objectFit:"cover"}}));
+    if(prevThumb && state.overlay)
+      viewer.appendChild(el("img",{src:prevThumb,style:{position:"absolute",inset:0,width:"100%",height:"100%",objectFit:"cover",opacity:0.42,mixBlendMode:"screen",pointerEvents:"none"}}));
+  } else {
+    const ph=el("div",{style:{width:"100%",height:"100%",display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",gap:"8px",color:"#a89e90"}});
+    if(prevThumb) ph.appendChild(el("img",{src:prevThumb,style:{position:"absolute",inset:0,width:"100%",height:"100%",objectFit:"cover",opacity:0.3}}));
+    ph.append(el("div",{style:{fontSize:"38px",position:"relative"}},REGIONS.find(r=>r.id===active).icon),
+              el("p",{style:{fontSize:"12.5px",color:"#9a9184",position:"relative"}},REGIONS.find(r=>r.id===active).tip));
+    viewer.appendChild(ph);
+  }
+  if(prevThumb){
+    const t=el("button",{style:{position:"absolute",top:"10px",right:"10px",background:state.overlay?`${AC}d0`:"rgba(0,0,0,0.6)",border:"none",borderRadius:"10px",padding:"6px 11px",fontSize:"11px",fontWeight:700,color:"#fff",cursor:"pointer"},onClick:()=>setState({overlay:!state.overlay})},state.overlay?"👁 직전 회차 겹침 ON":"👁 겹침 OFF");
+    viewer.appendChild(t);
+  }
+  if(cur) viewer.appendChild(el("button",{style:{position:"absolute",top:"10px",left:"10px",background:"rgba(248,113,113,0.85)",border:"none",borderRadius:"50%",width:"30px",height:"30px",color:"#fff",fontSize:"13px",cursor:"pointer"},onClick:()=>{ const p={...state.photos}; delete p[active]; setState({photos:p}); }},"✕"));
+  inner.appendChild(viewer);
+
+  if(prevThumb) inner.appendChild(el("p",{style:{fontSize:"11px",color:AC2,marginBottom:"14px",textAlign:"center"}},"직전 회차 사진이 겹쳐 보입니다 — 같은 각도로 맞춰 촬영해주세요"));
+
+  // 부위 슬롯 3개
+  const slots=el("div",{style:{display:"grid",gridTemplateColumns:"repeat(3,1fr)",gap:"9px",marginBottom:"16px"}});
+  REGIONS.forEach(r=>{
+    const has=!!state.photos[r.id];
+    const on=active===r.id;
+    const s=el("div",{style:{padding:"13px 8px",borderRadius:"14px",textAlign:"center",cursor:"pointer",background:on?`${AC}18`:CARD,border:`1px solid ${on?AC+"60":has?AC+"30":BD}`,position:"relative"},onClick:()=>setState({activeRegion:r.id})});
+    s.append(
+      el("div",{style:{fontSize:"19px",marginBottom:"5px",opacity:has?1:0.45}},r.icon),
+      el("div",{style:{fontSize:"11.5px",fontWeight:700,color:has?AC2:"#857d71"}},r.label),
+      el("div",{style:{fontSize:"10px",color:has?"#2f9e5f":"#b5ac9f",marginTop:"3px"}},has?"촬영 완료":"미촬영")
+    );
+    slots.appendChild(s);
+  });
+  inner.appendChild(slots);
+
+  // 촬영 버튼
+  const camIn=el("input",{type:"file",accept:"image/*",capture:"environment",style:"display:none"});
+  const fileIn=el("input",{type:"file",accept:"image/*",style:"display:none"});
+  camIn.addEventListener("change",e=>{ if(e.target.files[0]) addPhoto(e.target.files[0],active); e.target.value=""; });
+  fileIn.addEventListener("change",e=>{ if(e.target.files[0]) addPhoto(e.target.files[0],active); e.target.value=""; });
+  inner.append(camIn,fileIn);
+  const row=el("div",{style:{display:"flex",gap:"9px",marginBottom:"14px"}});
+  row.append(
+    el("button",{style:{flex:2,padding:"15px",borderRadius:"14px",background:`linear-gradient(135deg,${AC},${AC2})`,border:"none",color:"#ffffff",fontSize:"14px",fontWeight:800,cursor:"pointer"},onClick:()=>camIn.click()},`📷 ${REGIONS.find(r=>r.id===active).label} 촬영`),
+    el("button",{style:{flex:1,padding:"15px",borderRadius:"14px",background:CARD,border:`1px solid ${BD}`,color:"#4a443c",fontSize:"13px",fontWeight:600,cursor:"pointer"},onClick:()=>fileIn.click()},"🖼 업로드")
+  );
+  inner.appendChild(row);
+
+  inner.appendChild(el("div",{style:{background:`${AC}0d`,border:`1px solid ${AC}25`,borderRadius:"14px",padding:"12px 15px",marginBottom:"18px"}},
+    el("p",{style:{color:AC2,fontSize:"11.5px",margin:0,lineHeight:1.6}},"💡 회차 비교가 정확하려면 매번 같은 부위·같은 배율·같은 조명으로 촬영해야 합니다. 두피 카메라 배율은 고정해두세요.")));
+
+  const btn=el("button",{style:{width:"100%",padding:"17px",borderRadius:"15px",background:state.analyzing?"#dfeee6":`linear-gradient(135deg,${AC},${AC2})`,border:"none",color:state.analyzing?"#7a7266":"#ffffff",fontSize:"15px",fontWeight:800,cursor:state.analyzing?"not-allowed":"pointer",boxShadow:state.analyzing?"none":`0 6px 26px ${AC}28`},onClick:()=>{ if(state.analyzing) return; if(photoCount()===0) return toast("최소 1장은 촬영해주세요"); if(photoCount()<3 && !confirm("3부위를 모두 촬영해야 회차 비교가 정확합니다.\n이대로 분석할까요?")) return; analyze(); }});
+  if(state.analyzing){
+    btn.append(el("span",{style:{width:"16px",height:"16px",border:"2px solid rgba(255,255,255,0.3)",borderTopColor:"#fff",borderRadius:"50%",display:"inline-block",marginRight:"9px",verticalAlign:"middle"},class:"spin"}),"두피 분석 중...");
+  } else btn.textContent=`✨ ${photoCount()}장으로 두피 진단받기`;
+  inner.appendChild(btn);
+
+  if(state.error) inner.appendChild(el("div",{style:{marginTop:"12px",padding:"14px",borderRadius:"12px",background:"#fdecec",border:"1px solid #f0c9c9",color:"#d35454",textAlign:"center",fontSize:"12.5px"}},state.error));
+
+  wrap.appendChild(inner);
+  return wrap;
+}
+
+/* ── 화면 3. 결과 ──────────────────────────────────────── */
+function metricBar(m, grade, compareGrade){
+  const pct=(4-grade)/4*100;
+  const c=grade<=1?"#2f9e5f":grade===2?"#c08a00":grade===3?"#dd7a33":"#d35454";
+  const row=el("div",{style:{marginBottom:"11px"}});
+  const top=el("div",{style:{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:"5px"}});
+  top.append(el("span",{style:{fontSize:"12px",color:"#4a443c",fontWeight:600}},m.label),
+    el("span",{style:{fontSize:"11px",color:c,fontWeight:700}},GRADE_TEXT[grade]));
+  row.appendChild(top);
+  const track=el("div",{style:{height:"7px",borderRadius:"4px",background:"#ece7dd",overflow:"hidden",position:"relative"}});
+  track.appendChild(el("div",{style:{width:pct+"%",height:"100%",background:c,borderRadius:"4px"}}));
+  row.appendChild(track);
+  if(compareGrade!=null && compareGrade!==grade){
+    const d=compareGrade-grade;   // + 면 개선
+    row.appendChild(el("div",{style:{fontSize:"10.5px",marginTop:"4px",color:d>0?"#2f9e5f":"#7a7266",fontWeight:600}},
+      d>0?`▲ 1회차 대비 ${d}단계 개선`:`△ 1회차 대비 ${-d}단계 관리 필요`));
+  }
+  return row;
+}
+
+function scoreRing(score,size){
+  const svgNS="http://www.w3.org/2000/svg";
+  const svg=document.createElementNS(svgNS,"svg");
+  svg.setAttribute("width",size); svg.setAttribute("height",size); svg.setAttribute("viewBox","0 0 100 100");
+  const mk=(r,stroke,w,extra)=>{ const c=document.createElementNS(svgNS,"circle"); c.setAttribute("cx","50"); c.setAttribute("cy","50"); c.setAttribute("r",r); c.setAttribute("fill","none"); c.setAttribute("stroke",stroke); c.setAttribute("stroke-width",w); if(extra) Object.entries(extra).forEach(([k,v])=>c.setAttribute(k,v)); return c; };
+  svg.appendChild(mk(44,"#ece7dd",9));
+  svg.appendChild(mk(44,scoreColor(score),9,{"stroke-dasharray":`${2.76*score} 276`,"stroke-linecap":"round","transform":"rotate(-90 50 50)"}));
+  const t1=document.createElementNS(svgNS,"text"); t1.setAttribute("x","50"); t1.setAttribute("y","45"); t1.setAttribute("text-anchor","middle"); t1.setAttribute("fill",scoreColor(score)); t1.setAttribute("font-size","25"); t1.setAttribute("font-weight","800"); t1.textContent=score;
+  const t2=document.createElementNS(svgNS,"text"); t2.setAttribute("x","50"); t2.setAttribute("y","61"); t2.setAttribute("text-anchor","middle"); t2.setAttribute("fill","#555"); t2.setAttribute("font-size","9"); t2.textContent="/ 100";
+  svg.append(t1,t2);
+  return svg;
+}
+
+function buildResult(){
+  const r=state.result;
+  const hist=state.history;
+  const first=hist.length>1?hist[0]:null;
+  const plan=PLANS[r.planCode]||PLANS.signature;
+  const wrap=el("div",{style:{minHeight:"100vh",background:BG}});
+  wrap.appendChild(bgGlow(0.08));
+  const inner=el("div",{style:{position:"relative",zIndex:1,maxWidth:"780px",margin:"0 auto",padding:"22px 16px 40px"},class:"fade"});
+
+  inner.appendChild(el("div",{style:{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:"16px"}},[
+    el("button",{style:{background:"none",border:"none",color:"#857d71",cursor:"pointer",fontSize:"13px",padding:0},onClick:()=>setState({mode:"capture"})},"← 사진"),
+    el("span",{style:{fontSize:"12px",color:"#9a9184"}},`${r.dateText} · ${r.designer} 디자이너`),
+    el("button",{style:{background:"none",border:`1px solid ${BD}`,color:"#a8a4b8",cursor:"pointer",fontSize:"11.5px",padding:"5px 11px",borderRadius:"10px"},onClick:()=>setState({mode:"home",photos:{},result:null})},"처음으로"),
+  ]));
+
+  // 고객 · 회차 헤더
+  inner.appendChild(el("div",{style:{display:"flex",alignItems:"center",gap:"10px",marginBottom:"14px"}},[
+    el("span",{style:{fontSize:"19px",fontWeight:800,color:"#2b2721"}},`${state.cust.name}님`),
+    el("span",{style:{fontSize:"11px",fontWeight:700,color:AC2,background:`${AC}18`,padding:"4px 11px",borderRadius:"20px"}},`${r.round}회차 진단`),
+  ]));
+
+  // 점수 + 항목
+  const topRow=el("div",{style:{display:"grid",gridTemplateColumns:"1fr 1fr",gap:"12px",marginBottom:"14px"}});
+  const photoBox=el("div",{style:{background:"#eee9e0",borderRadius:"18px",overflow:"hidden",border:`1px solid ${BD}`,position:"relative"}});
+  const firstPhoto=REGIONS.map(x=>state.photos[x.id]).find(Boolean);
+  if(firstPhoto) photoBox.appendChild(el("img",{src:firstPhoto.url,style:{width:"100%",aspectRatio:"1/1",objectFit:"cover",display:"block"}}));
+  const thumbRow=el("div",{style:{display:"flex",gap:"4px",padding:"7px",background:"#f3efe7"}});
+  REGIONS.forEach(rg=>{
+    const p=state.photos[rg.id]; if(!p) return;
+    const th=el("div",{style:{flex:1,height:"40px",borderRadius:"7px",overflow:"hidden",cursor:"pointer"},onClick:()=>{ const img=photoBox.querySelector("img"); if(img) img.src=p.url; }});
+    th.appendChild(el("img",{src:p.url,style:{width:"100%",height:"100%",objectFit:"cover"}}));
+    thumbRow.appendChild(th);
+  });
+  photoBox.appendChild(thumbRow);
+  topRow.appendChild(photoBox);
+
+  const scoreBox=el("div",{style:{background:`linear-gradient(135deg,rgba(79,169,123,0.1),rgba(127,212,166,0.04))`,border:`1px solid ${AC}30`,borderRadius:"18px",padding:"18px",display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",gap:"10px"}});
+  scoreBox.appendChild(scoreRing(r.score,108));
+  scoreBox.appendChild(el("div",{style:{display:"flex",flexWrap:"wrap",gap:"6px",justifyContent:"center"}},[
+    el("span",{style:{fontSize:"11.5px",fontWeight:700,color:scoreColor(r.score),background:`${scoreColor(r.score)}18`,padding:"4px 11px",borderRadius:"20px"}},`${r.grade} ${scoreLabel(r.score)}`),
+    r.type&&el("span",{style:{fontSize:"11.5px",fontWeight:700,color:AC2,background:`${AC}18`,padding:"4px 11px",borderRadius:"20px"}},r.type+" 두피"),
+  ]));
+  if(first){
+    const d=r.score-first.score;
+    scoreBox.appendChild(el("p",{style:{fontSize:"11.5px",fontWeight:700,color:d>0?"#2f9e5f":d<0?"#dd7a33":"#7a7266"}},
+      d>0?`1회차 대비 ${d}점 개선`:d<0?`1회차 대비 ${-d}점 하락`:"1회차와 동일"));
+  }
+  topRow.appendChild(scoreBox);
+  inner.appendChild(topRow);
+
+  // 탭
+  const tabs=[["overview","📊 진단"],["compare","📈 변화"],["plan","📋 관리 플랜"],["care","💧 홈케어"]];
+  const tabBar=el("div",{style:{display:"flex",gap:"5px",marginBottom:"14px",background:CARD,border:`1px solid ${BD}`,borderRadius:"14px",padding:"5px"}});
+  tabs.forEach(([id,label])=>tabBar.appendChild(el("button",{style:{flex:1,padding:"10px 3px",borderRadius:"10px",border:"none",background:state.tab===id?`linear-gradient(135deg,${AC},${AC2})`:"transparent",color:state.tab===id?"#ffffff":"#8a8276",fontSize:"clamp(10.5px,2.4vw,12.5px)",fontWeight:700,cursor:"pointer",whiteSpace:"nowrap"},onClick:()=>setState({tab:id})},label)));
+  inner.appendChild(tabBar);
+
+  const content=el("div",{class:"fade"});
+  if(state.tab==="overview") buildOverview(content,r,first);
+  if(state.tab==="compare") buildCompare(content,r,hist);
+  if(state.tab==="plan") buildPlan(content,r,plan,hist);
+  if(state.tab==="care") buildCare(content,r);
+  inner.appendChild(content);
+
+  // 리포트 저장
+  const saveBtn=el("button",{style:{width:"100%",padding:"17px",borderRadius:"15px",background:state.saving?"#dfeee6":`linear-gradient(135deg,${AC},${AC2})`,border:"none",color:state.saving?"#7a7266":"#ffffff",fontSize:"15px",fontWeight:800,cursor:"pointer",marginTop:"8px",boxShadow:`0 6px 26px ${AC}30`},onClick:()=>{ if(!state.saving) exportReport(); }},
+    state.saving?"리포트 만드는 중...":"💬 카톡 전송용 리포트 저장");
+  inner.appendChild(saveBtn);
+  inner.appendChild(el("p",{style:{textAlign:"center",color:"#a89e90",fontSize:"10.5px",marginTop:"12px",lineHeight:1.6}},"저장된 이미지를 고객님 카톡으로 보내주세요"));
+  inner.appendChild(el("p",{style:{textAlign:"center",color:"#a89e90",fontSize:"10px",marginTop:"16px"}},"본 진단은 두피 환경 관리를 위한 참고 자료입니다"));
+
+  wrap.appendChild(inner);
+  return wrap;
+}
+
+function buildOverview(content,r,first){
+  content.appendChild(card([sectionTitle("🩺 종합 소견"),
+    el("p",{style:{color:"#4a443c",fontSize:"13px",lineHeight:1.8,marginBottom:r.diagnosis?"12px":0}},r.summary),
+    r.diagnosis&&el("div",{style:{padding:"12px 14px",borderRadius:"12px",background:`${AC}0a`,border:`1px solid ${AC}25`}},
+      el("p",{style:{color:"#a8a4b8",fontSize:"12px",lineHeight:1.7,margin:0}},`💬 ${r.diagnosis}`))
+  ]));
+
+  const mc=card([sectionTitle("📊 6개 항목 상태")]);
+  METRICS.forEach(m=>mc.appendChild(metricBar(m,r.grades[m.key],first?first.grades[m.key]:null)));
+  content.appendChild(mc);
+
+  if(r.conditions?.length){
+    const cc=card([sectionTitle("⚠ 확인된 두피 상태")]);
+    const chips=el("div",{style:{display:"flex",flexWrap:"wrap",gap:"6px"}});
+    r.conditions.forEach(c=>chips.appendChild(el("span",{style:{padding:"5px 12px",borderRadius:"20px",fontSize:"12px",background:`${AC}12`,border:`1px solid ${AC}30`,color:AC2}},`• ${c}`)));
+    cc.appendChild(chips); content.appendChild(cc);
+  }
+
+  const ic=card([sectionTitle("🧪 성분 가이드")]);
+  const grid=el("div",{style:{display:"grid",gridTemplateColumns:"1fr 1fr",gap:"11px"}});
+  const gb=el("div",{style:{padding:"12px 14px",borderRadius:"12px",background:"#eef8f1",border:"1px solid #cbe8d6"}});
+  gb.appendChild(el("div",{style:{fontSize:"11px",color:"#2f9e5f",fontWeight:700,marginBottom:"8px"}},"✓ 맞는 성분"));
+  (r.recommendIngredients||[]).forEach(s=>gb.appendChild(el("div",{style:{fontSize:"11.5px",color:"#2f7a52",marginBottom:"4px",lineHeight:1.5}},`• ${s}`)));
+  const bb=el("div",{style:{padding:"12px 14px",borderRadius:"12px",background:"#fdf1f1",border:"1px solid #f2d2d2"}});
+  bb.appendChild(el("div",{style:{fontSize:"11px",color:"#d35454",fontWeight:700,marginBottom:"8px"}},"✗ 피할 성분"));
+  (r.avoidIngredients||[]).forEach(s=>bb.appendChild(el("div",{style:{fontSize:"11.5px",color:"#a85555",marginBottom:"4px",lineHeight:1.5}},`• ${s}`)));
+  grid.append(gb,bb); ic.appendChild(grid); content.appendChild(ic);
+}
+
+function buildCompare(content,r,hist){
+  if(hist.length<2){
+    content.appendChild(card([
+      el("div",{style:{textAlign:"center",padding:"22px 6px"}},[
+        el("div",{style:{fontSize:"34px",marginBottom:"12px"}},"📈"),
+        el("p",{style:{fontSize:"13.5px",color:"#4a443c",fontWeight:700,marginBottom:"7px"}},"이번이 첫 진단입니다"),
+        el("p",{style:{fontSize:"12px",color:"#857d71",lineHeight:1.7}},"다음 회차부터 오늘 사진·점수와 나란히 비교해\n두피 환경이 어떻게 달라졌는지 보여드립니다."),
+      ])
+    ]));
+    return;
+  }
+  const first=hist[0];
+
+  // 점수 추이
+  const tc=card([sectionTitle("📈 회차별 점수 변화")]);
+  const chart=el("div",{style:{display:"flex",alignItems:"flex-end",gap:"7px",height:"110px",padding:"6px 0 0"}});
+  hist.forEach((h,i)=>{
+    const col=el("div",{style:{flex:1,display:"flex",flexDirection:"column",alignItems:"center",gap:"5px",height:"100%",justifyContent:"flex-end"}});
+    col.append(
+      el("span",{style:{fontSize:"10.5px",fontWeight:800,color:scoreColor(h.score)}},String(h.score)),
+      el("div",{style:{width:"100%",maxWidth:"34px",height:Math.max(6,h.score*0.62)+"px",borderRadius:"6px 6px 0 0",background:i===hist.length-1?`linear-gradient(180deg,${AC2},${AC})`:`${scoreColor(h.score)}45`}}),
+      el("span",{style:{fontSize:"9.5px",color:"#9a9184"}},`${i+1}회`)
+    );
+    chart.appendChild(col);
+  });
+  tc.appendChild(chart);
+  const d=r.score-first.score;
+  tc.appendChild(el("div",{style:{marginTop:"14px",padding:"11px 14px",borderRadius:"12px",background:d>0?"#eef8f1":`${AC}08`,border:`1px solid ${d>0?"#cbe8d6":AC+"22"}`}},
+    el("p",{style:{fontSize:"12px",color:d>0?"#2f9e5f":"#a8a4b8",margin:0,fontWeight:700}},
+      d>0?`1회차 ${first.score}점 → 이번 ${r.score}점, ${d}점 개선되었습니다`
+         :d<0?`1회차 ${first.score}점 → 이번 ${r.score}점, 관리 집중이 필요합니다`
+         :`1회차와 동일한 ${r.score}점을 유지 중입니다`)));
+  content.appendChild(tc);
+
+  // 항목별 개선 요약
+  let up=0,same=0,down=0;
+  METRICS.forEach(m=>{ const diff=first.grades[m.key]-r.grades[m.key]; if(diff>0)up++; else if(diff<0)down++; else same++; });
+  const sc=card([sectionTitle("🔍 항목별 변화")]);
+  sc.appendChild(el("div",{style:{display:"flex",gap:"8px",marginBottom:"14px"}},[
+    ["개선",up,"#2f9e5f"],["유지",same,"#7a7266"],["관리 필요",down,"#dd7a33"]
+  ].map(([l,n,c])=>el("div",{style:{flex:1,textAlign:"center",padding:"11px 4px",borderRadius:"12px",background:`${c}12`,border:`1px solid ${c}28`}},[
+    el("div",{style:{fontSize:"18px",fontWeight:800,color:c}},String(n)),
+    el("div",{style:{fontSize:"10.5px",color:"#7a7266",marginTop:"2px"}},l),
+  ]))));
+  METRICS.forEach(m=>sc.appendChild(metricBar(m,r.grades[m.key],first.grades[m.key])));
+  content.appendChild(sc);
+
+  // 사진 비교
+  REGIONS.forEach(rg=>{
+    const before=first.thumbs?.[rg.id];
+    const after=state.photos[rg.id]?.url;
+    if(!before||!after) return;
+    const pc=card([sectionTitle(`${rg.icon} ${rg.label} · 1회차 → 이번`)]);
+    const g=el("div",{style:{display:"grid",gridTemplateColumns:"1fr 1fr",gap:"8px"}});
+    [[before,`1회차 ${first.dateText}`],[after,`${r.round}회차 ${r.dateText}`]].forEach(([src,label],i)=>{
+      const b=el("div",{style:{borderRadius:"13px",overflow:"hidden",border:`1px solid ${i===1?AC+"45":BD}`,position:"relative",background:"#eee9e0"}});
+      b.appendChild(el("img",{src,style:{width:"100%",aspectRatio:"1/1",objectFit:"cover",display:"block"}}));
+      b.appendChild(el("div",{style:{position:"absolute",bottom:0,left:0,right:0,background:"rgba(0,0,0,0.6)",padding:"5px 8px",fontSize:"10px",color:i===1?"#8fe0b4":"#e0dbd2",fontWeight:600}},label));
+      g.appendChild(b);
+    });
+    pc.appendChild(g); content.appendChild(pc);
+  });
+}
+
+function buildPlan(content,r,plan,hist){
+  // 실제 등록한 플랜이 있으면 그 플랜 기준으로, 없으면 AI 추천 플랜 기준으로 표시
+  const enrolledPlan = state.enrolled && state.enrolled.plan ? PLANS[state.enrolled.plan] : null;
+  const road = enrolledPlan || plan;
+  const since = state.enrolled && state.enrolled.at ? new Date(state.enrolled.at) : null;
+  const done = enrolledPlan
+    ? hist.filter(h=>!since || new Date(h.date) >= since).length
+    : hist.filter(h=>h.planCode===road.code).length;
+  const next=addDays(new Date(), 7);
+
+  // 추천 플랜
+  const pc=card([],{background:`linear-gradient(135deg,rgba(79,169,123,0.14),rgba(127,212,166,0.05))`,border:`1px solid ${AC}45`});
+  pc.append(
+    el("div",{style:{fontSize:"9.5px",letterSpacing:"0.18em",color:AC2,fontWeight:700,marginBottom:"9px"}},enrolledPlan?"ENROLLED · 등록하신 플랜":"RECOMMENDED · 더조각 테라피"),
+    el("div",{style:{display:"flex",alignItems:"baseline",gap:"9px",flexWrap:"wrap",marginBottom:"7px"}},[
+      el("span",{style:{fontSize:"21px",fontWeight:800,color:"#2b2721"}},road.name),
+      el("span",{style:{fontSize:"12px",color:AC2,fontWeight:700}},road.period),
+    ]),
+    el("p",{style:{fontSize:"12.5px",color:"#6e665c",lineHeight:1.6,marginBottom:"14px"}},road.for)
+  );
+  const priceRow=el("div",{style:{display:"flex",alignItems:"baseline",gap:"10px",flexWrap:"wrap",marginBottom:"10px"}});
+  priceRow.append(
+    el("span",{style:{fontSize:"23px",fontWeight:800,color:AC2}},won(road.price)),
+    el("span",{style:{fontSize:"12px",color:"#857d71"}},`${road.rounds}회 · 회당 ${won(road.per)}`),
+    el("span",{style:{fontSize:"11px",fontWeight:700,color:"#ffffff",background:AC2,padding:"3px 9px",borderRadius:"8px"}},`${road.off}% 할인`)
+  );
+  pc.appendChild(priceRow);
+  if(road.gift) pc.appendChild(el("div",{style:{padding:"9px 13px",borderRadius:"11px",background:"#fdf6e3",border:"1px solid #ecdcac",marginBottom:"9px"}},
+    el("p",{style:{fontSize:"11.5px",color:"#c08a00",margin:0,fontWeight:700}},`🎁 ${road.gift} 증정`)));
+  pc.appendChild(el("p",{style:{fontSize:"11px",color:"#8a8276"}},road.note));
+  content.appendChild(pc);
+
+  // 회차 로드맵
+  const rc=card([sectionTitle("🗺 회차 로드맵")]);
+  rc.appendChild(el("p",{style:{fontSize:"12px",color:"#6e665c",marginBottom:"13px"}},`주 1회 기준 · ${road.rounds}회 중 ${Math.min(done+1,road.rounds)}회차 진행`));
+  const dots=el("div",{style:{display:"flex",flexWrap:"wrap",gap:"6px",marginBottom:"14px"}});
+  for(let i=0;i<road.rounds;i++){
+    const isDone=i<done, isNow=i===done;
+    dots.appendChild(el("div",{style:{width:"28px",height:"28px",borderRadius:"9px",display:"flex",alignItems:"center",justifyContent:"center",fontSize:"10.5px",fontWeight:700,
+      background:isDone?AC:isNow?`${AC}25`:"#f3efe7",
+      color:isDone?"#ffffff":isNow?AC2:"#b5ac9f",
+      border:isNow?`1px solid ${AC}70`:"1px solid transparent"}},isDone?"✓":String(i+1)));
+  }
+  rc.appendChild(dots);
+  rc.appendChild(el("div",{style:{padding:"12px 14px",borderRadius:"12px",background:`${AC}0c`,border:`1px solid ${AC}28`}},[
+    el("p",{style:{fontSize:"12px",color:AC2,fontWeight:700,marginBottom:"4px"}},`📅 다음 관리 권장일 · ${fmtDate(next)}`),
+    el("p",{style:{fontSize:"11px",color:"#857d71",lineHeight:1.6}},"더조각 테라피는 1회 20분으로, 펌·염색 방치시간에 함께 진행하실 수 있습니다."),
+  ]));
+  content.appendChild(rc);
+
+  // 다른 플랜
+  const oc=card([sectionTitle("다른 플랜")]);
+  Object.values(PLANS).filter(p=>p.code!==road.code).forEach(p=>{
+    const row=el("div",{style:{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"12px 14px",borderRadius:"12px",background:"#faf8f4",border:`1px solid ${BD}`,marginBottom:"8px"}});
+    row.append(
+      el("div",{},[
+        el("div",{style:{fontSize:"13px",fontWeight:700,color:"#2b2721"}},p.name),
+        el("div",{style:{fontSize:"10.5px",color:"#8a8276",marginTop:"3px"}},`${p.period} · ${p.rounds}회 · 회당 ${won(p.per)}`),
+      ]),
+      el("div",{style:{textAlign:"right"}},[
+        el("div",{style:{fontSize:"14px",fontWeight:800,color:"#a8a4b8"}},won(p.price)),
+        el("div",{style:{fontSize:"10px",color:AC2,marginTop:"2px"}},`${p.off}% 할인`),
+      ])
+    );
+    oc.appendChild(row);
+  });
+  oc.appendChild(el("p",{style:{fontSize:"10.5px",color:"#b5ac9f",marginTop:"8px"}},`1회 체험 ${won(SINGLE_PRICE)}`));
+  content.appendChild(oc);
+}
+
+function buildCare(content,r){
+  [...(r.cares||[])].sort((a,b)=>(a.priority||9)-(b.priority||9)).forEach(c=>{
+    const cc=card([]);
+    const row=el("div",{style:{display:"flex",gap:"12px"}});
+    row.appendChild(el("div",{style:{fontSize:"22px",width:"40px",height:"40px",display:"flex",alignItems:"center",justifyContent:"center",background:"#f3efe7",borderRadius:"11px",flexShrink:0}},c.icon||"💧"));
+    const info=el("div",{style:{flex:1}});
+    const tr=el("div",{style:{display:"flex",alignItems:"center",gap:"7px",marginBottom:"4px"}});
+    if(c.priority===1) tr.appendChild(el("span",{style:{fontSize:"9.5px",color:"#ffffff",background:AC2,padding:"2px 8px",borderRadius:"8px",fontWeight:800}},"우선"));
+    tr.appendChild(el("span",{style:{fontSize:"13px",fontWeight:700,color:"#2b2721"}},c.title));
+    info.append(tr,
+      el("p",{style:{color:"#857d71",fontSize:"12px",lineHeight:1.6,margin:"0 0 5px"}},c.description),
+      el("span",{style:{fontSize:"11px",color:AC2,fontWeight:600}},`🗓 ${c.frequency}`));
+    row.appendChild(info); cc.appendChild(row); content.appendChild(cc);
+  });
+  if(r.lifestyle?.length){
+    const lc=card([sectionTitle("🌿 생활 습관")]);
+    r.lifestyle.forEach((l,i)=>{
+      const row=el("div",{style:{display:"flex",gap:"10px",marginBottom:i<r.lifestyle.length-1?"10px":0}});
+      row.append(el("span",{style:{color:AC2,fontWeight:700,fontSize:"11.5px",flexShrink:0}},`0${i+1}`),
+        el("span",{style:{color:"#6e665c",fontSize:"12.5px",lineHeight:1.6}},l));
+      lc.appendChild(row);
+    });
+    content.appendChild(lc);
+  }
+}
+
+/* ── 관리자 화면 ───────────────────────────────────────── */
+const AD_INPUT={width:"100%",padding:"11px 13px",borderRadius:"11px",background:"#f3efe7",border:`1px solid ${BD}`,color:"#2b2721",fontSize:"14px"};
+
+function adSet(p){ setState({admin:{...state.admin,...p}}); }
+
+function buildAdmin(){
+  const wrap=el("div",{style:{minHeight:"100vh",background:BG}});
+  wrap.appendChild(bgGlow(0.06));
+  const inner=el("div",{style:{position:"relative",zIndex:1,maxWidth:"680px",margin:"0 auto",padding:"22px 16px 60px"},class:"fade"});
+
+  inner.appendChild(el("div",{style:{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:"18px"}},[
+    el("button",{style:{background:"none",border:"none",color:"#857d71",cursor:"pointer",fontSize:"13px",padding:0},onClick:()=>setState({mode:"home"})},"← 나가기"),
+    el("span",{style:{fontSize:"15px",fontWeight:800,color:"#2b2721"}},"관리자"),
+    el("span",{style:{width:"46px"}}),
+  ]));
+
+  const tabs=[["designers","디자이너"],["plans","가격"],["customers","고객"]];
+  const tabBar=el("div",{style:{display:"flex",gap:"5px",marginBottom:"16px",background:CARD,border:`1px solid ${BD}`,borderRadius:"14px",padding:"5px"}});
+  tabs.forEach(([id,label])=>tabBar.appendChild(el("button",{style:{flex:1,padding:"10px 4px",borderRadius:"10px",border:"none",background:state.admin.tab===id?`linear-gradient(135deg,${AC},${AC2})`:"transparent",color:state.admin.tab===id?"#ffffff":"#8a8276",fontSize:"13px",fontWeight:700,cursor:"pointer"},onClick:()=>adSet({tab:id})},label)));
+  inner.appendChild(tabBar);
+
+  if(state.admin.tab==="designers") adminDesigners(inner);
+  if(state.admin.tab==="plans") adminPlans(inner);
+  if(state.admin.tab==="customers") adminCustomers(inner);
+
+  wrap.appendChild(inner);
+  return wrap;
+}
+
+/* 디자이너 추가 · 삭제 */
+function adminDesigners(inner){
+  const c=card([sectionTitle("디자이너 명단")]);
+  if(!DESIGNERS.length) c.appendChild(el("p",{style:{fontSize:"12.5px",color:"#8a8276",marginBottom:"10px"}},"등록된 디자이너가 없습니다."));
+  DESIGNERS.forEach((name,i)=>{
+    const row=el("div",{style:{display:"flex",alignItems:"center",justifyContent:"space-between",padding:"11px 14px",borderRadius:"11px",background:"#faf8f4",border:`1px solid ${BD}`,marginBottom:"7px"}});
+    row.append(
+      el("span",{style:{fontSize:"14px",fontWeight:600,color:"#2b2721"}},name),
+      el("button",{style:{background:"none",border:"none",color:"#d35454",fontSize:"13px",cursor:"pointer",fontWeight:700,padding:"4px 8px"},onClick:()=>{
+        if(!confirm(`'${name}' 디자이너를 명단에서 삭제할까요?\n(이미 저장된 진단 기록은 그대로 남습니다)`)) return;
+        DESIGNERS=DESIGNERS.filter((_,j)=>j!==i); render();
+      }},"삭제")
+    );
+    c.appendChild(row);
+  });
+
+  const addRow=el("div",{style:{display:"flex",gap:"8px",marginTop:"12px"}});
+  const nameIn=el("input",{type:"text",placeholder:"이름 입력",style:{...AD_INPUT,flex:1}});
+  const addBtn=el("button",{style:{padding:"11px 18px",borderRadius:"11px",background:`linear-gradient(135deg,${AC},${AC2})`,border:"none",color:"#ffffff",fontSize:"13px",fontWeight:800,cursor:"pointer",whiteSpace:"nowrap"}},"추가");
+  const add=()=>{
+    const v=nameIn.value.trim();
+    if(!v) return;
+    if(DESIGNERS.includes(v)) return toast("이미 있는 이름입니다");
+    DESIGNERS=[...DESIGNERS,v]; render();
+  };
+  addBtn.addEventListener("click",add);
+  nameIn.addEventListener("keydown",e=>{ if(e.key==="Enter") add(); });
+  addRow.append(nameIn,addBtn);
+  c.appendChild(addRow);
+  inner.appendChild(c);
+
+  // PIN 변경
+  const pc=card([sectionTitle("관리자 PIN")]);
+  const pinIn=el("input",{type:"text",inputmode:"numeric",value:ADMIN_PIN,style:AD_INPUT});
+  pinIn.addEventListener("input",e=>{ ADMIN_PIN=e.target.value.trim()||"1234"; });
+  pc.append(pinIn,el("p",{style:{fontSize:"11px",color:"#8a8276",marginTop:"8px"}},"이 화면에 들어올 때 쓰는 번호입니다."));
+  inner.appendChild(pc);
+
+  inner.appendChild(saveBar());
+}
+
+/* 플랜 가격 수정 */
+function adminPlans(inner){
+  const sc=card([sectionTitle("1회 정가")]);
+  const sIn=el("input",{type:"number",value:String(SINGLE_PRICE),style:AD_INPUT});
+  sIn.addEventListener("input",e=>{ SINGLE_PRICE=Number(e.target.value)||0; });
+  sc.append(sIn,el("p",{style:{fontSize:"11px",color:"#8a8276",marginTop:"8px"}},"할인율은 이 금액을 기준으로 자동 계산됩니다."));
+  inner.appendChild(sc);
+
+  ["start","signature","premium"].forEach(code=>{
+    const pl=PLANS[code];
+    const c=card([sectionTitle(pl.name)]);
+    const field=(label,node)=>el("div",{style:{marginBottom:"10px"}},[
+      el("label",{style:{display:"block",fontSize:"11px",color:"#7a7266",fontWeight:600,marginBottom:"6px"}},label), node
+    ]);
+    const mk=(key,type)=>{
+      const i=el("input",{type:type||"text",value:pl[key]==null?"":String(pl[key]),style:AD_INPUT});
+      i.addEventListener("input",e=>{
+        pl[key]= type==="number" ? (Number(e.target.value)||0) : e.target.value;
+        if(key==="price"||key==="rounds"){
+          pl.per = pl.rounds ? Math.round(pl.price/pl.rounds) : 0;
+          pl.off = SINGLE_PRICE ? Math.round((1-pl.per/SINGLE_PRICE)*100) : 0;
+          const info=document.getElementById("calc_"+code);
+          if(info) info.textContent=`회당 ${won(pl.per)} · ${pl.off}% 할인`;
+        }
+      });
+      return i;
+    };
+    c.append(
+      field("플랜 이름",mk("name")),
+      field("기간 표시 (예: 12주 플랜)",mk("period")),
+      field("총 회차",mk("rounds","number")),
+      field("총 금액 (원)",mk("price","number")),
+      field("증정품 문구 (없으면 비워두세요)",mk("gift")),
+      field("한 줄 설명",mk("for")),
+      el("div",{id:"calc_"+code,style:{fontSize:"12.5px",fontWeight:700,color:AC2,padding:"9px 13px",borderRadius:"10px",background:`${AC}12`,border:`1px solid ${AC}28`}},`회당 ${won(pl.per)} · ${pl.off}% 할인`)
+    );
+    inner.appendChild(c);
+  });
+  inner.appendChild(saveBar());
+}
+
+function saveBar(){
+  const b=el("button",{style:{width:"100%",padding:"16px",borderRadius:"14px",background:`linear-gradient(135deg,${AC},${AC2})`,border:"none",color:"#ffffff",fontSize:"15px",fontWeight:800,cursor:"pointer",marginTop:"4px"}},"저장하기");
+  b.addEventListener("click",async()=>{
+    b.textContent="저장 중...";
+    ["start","signature","premium"].forEach(code=>{
+      const pl=PLANS[code];
+      pl.per = pl.rounds ? Math.round(pl.price/pl.rounds) : 0;
+      pl.off = SINGLE_PRICE ? Math.round((1-pl.per/SINGLE_PRICE)*100) : 0;
+      if(!pl.gift) pl.gift=null;
+    });
+    const ok=await saveSettings();
+    b.textContent="저장하기";
+    toast(ok?"모든 기기에 저장되었습니다":"이 기기에만 저장되었습니다 (서버 연결 안 됨)");
+  });
+  return b;
+}
+
+/* 고객 검색 · 과거 리포트 재전송 */
+function adminCustomers(inner){
+  const sc=card([sectionTitle("고객 검색")]);
+  const row=el("div",{style:{display:"flex",gap:"8px"}});
+  const q=el("input",{type:"text",placeholder:"고객 성함 또는 번호 뒤 4자리",value:state.admin.q,style:{...AD_INPUT,flex:1}});
+  q.addEventListener("input",e=>{ state.admin.q=e.target.value; });
+  const go=async()=>{
+    adSet({busy:true});
+    try{
+      const res=await fetch("/api/session",{method:"POST",headers:{"Content-Type":"application/json"},
+        body:JSON.stringify({action:"searchCustomers",q:state.admin.q})});
+      const j=await res.json();
+      adSet({results:j.customers||[],sel:null,selSessions:[],busy:false});
+      if(!(j.customers||[]).length) toast("검색 결과가 없습니다");
+    }catch(e){ adSet({busy:false}); toast("서버에 연결할 수 없습니다"); }
+  };
+  const btn=el("button",{style:{padding:"11px 18px",borderRadius:"11px",background:`linear-gradient(135deg,${AC},${AC2})`,border:"none",color:"#ffffff",fontSize:"13px",fontWeight:800,cursor:"pointer"}},"검색");
+  btn.addEventListener("click",go);
+  q.addEventListener("keydown",e=>{ if(e.key==="Enter") go(); });
+  row.append(q,btn);
+  sc.appendChild(row);
+  inner.appendChild(sc);
+
+  if(state.admin.results.length && !state.admin.sel){
+    const rc=card([sectionTitle(`검색 결과 ${state.admin.results.length}명`)]);
+    state.admin.results.forEach(c=>{
+      const r=el("div",{style:{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"12px 14px",borderRadius:"11px",background:"#faf8f4",border:`1px solid ${BD}`,marginBottom:"7px",cursor:"pointer"},onClick:()=>openCustomer(c)});
+      r.append(
+        el("div",{},[
+          el("div",{style:{fontSize:"14px",fontWeight:700,color:"#2b2721"}},`${c.name} (${c.phone4})`),
+          el("div",{style:{fontSize:"11px",color:"#8a8276",marginTop:"3px"}},`담당 ${c.designer||"-"}${c.enrolled_plan?` · ${PLANS[c.enrolled_plan]?.name||c.enrolled_plan} 등록`:""}`),
+        ]),
+        el("span",{style:{fontSize:"16px",color:AC2}},"›")
+      );
+      rc.appendChild(r);
+    });
+    inner.appendChild(rc);
+  }
+
+  if(state.admin.sel){
+    const c=state.admin.sel;
+    const dc=card([]);
+    dc.append(
+      el("div",{style:{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:"14px"}},[
+        el("span",{style:{fontSize:"17px",fontWeight:800,color:"#2b2721"}},`${c.name} (${c.phone4})`),
+        el("button",{style:{background:"none",border:`1px solid ${BD}`,borderRadius:"9px",padding:"5px 11px",fontSize:"11.5px",color:"#857d71",cursor:"pointer"},onClick:()=>adSet({sel:null,selSessions:[]})},"목록"),
+      ])
+    );
+
+    // 등록 플랜 지정
+    dc.appendChild(el("label",{style:{display:"block",fontSize:"11px",color:"#7a7266",fontWeight:600,marginBottom:"6px"}},"등록한 플랜"));
+    const sel=el("select",{style:{...AD_INPUT,appearance:"none"}});
+    [["","미등록"],["start",PLANS.start.name],["signature",PLANS.signature.name],["premium",PLANS.premium.name]].forEach(([v,label])=>{
+      const o=el("option",{value:v},label);
+      if((c.enrolled_plan||"")===v) o.setAttribute("selected","selected");
+      sel.appendChild(o);
+    });
+    sel.addEventListener("change",async e=>{
+      const v=e.target.value;
+      try{
+        const res=await fetch("/api/session",{method:"POST",headers:{"Content-Type":"application/json"},
+          body:JSON.stringify({action:"setEnrollment",customerId:c.id,plan:v||null})});
+        if(res.ok){ c.enrolled_plan=v||null; toast(v?"등록 플랜이 저장되었습니다":"등록 플랜을 해제했습니다"); }
+        else toast("저장에 실패했습니다");
+      }catch(err){ toast("서버에 연결할 수 없습니다"); }
+    });
+    dc.append(sel,el("p",{style:{fontSize:"11px",color:"#8a8276",margin:"8px 0 16px",lineHeight:1.6}},"지정하면 고객 리포트의 회차 로드맵이 실제 결제한 플랜 기준으로 표시됩니다."));
+
+    dc.appendChild(sectionTitle("진단 기록"));
+    if(!state.admin.selSessions.length) dc.appendChild(el("p",{style:{fontSize:"12.5px",color:"#8a8276"}},"기록을 불러오는 중이거나 진단 이력이 없습니다."));
+    state.admin.selSessions.forEach(s=>{
+      const row=el("div",{style:{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"12px 14px",borderRadius:"11px",background:"#faf8f4",border:`1px solid ${BD}`,marginBottom:"7px"}});
+      row.append(
+        el("div",{},[
+          el("div",{style:{fontSize:"13.5px",fontWeight:700,color:"#2b2721"}},`${s.round}회차 · ${s.score}점 (${s.grade})`),
+          el("div",{style:{fontSize:"11px",color:"#8a8276",marginTop:"3px"}},`${s.dateText} · ${s.designer||"-"}`),
+        ]),
+        el("button",{style:{padding:"9px 13px",borderRadius:"10px",background:`${AC}18`,border:`1px solid ${AC}40`,color:AC2,fontSize:"11.5px",fontWeight:800,cursor:"pointer",whiteSpace:"nowrap"},onClick:()=>resendReport(c,s)},"리포트 다시 보내기")
+      );
+      dc.appendChild(row);
+    });
+    inner.appendChild(dc);
+  }
+}
+
+async function openCustomer(c){
+  adSet({sel:c,selSessions:[]});
+  try{
+    const res=await fetch("/api/session",{method:"POST",headers:{"Content-Type":"application/json"},
+      body:JSON.stringify({action:"customerDetail",customerId:c.id})});
+    const j=await res.json();
+    const sessions=(j.sessions||[]).map(s=>({
+      date:s.taken_at, dateText:fmtDate(new Date(s.taken_at)), designer:s.designer,
+      grades:normalizeGrades(s.grades), score:s.score, grade:s.grade,
+      type:s.scalp_type, detailedType:s.detailed_type, conditions:s.conditions||[],
+      summary:s.summary||"", diagnosis:s.diagnosis||"",
+      cares:s.cares||[], lifestyle:s.lifestyle||[],
+      planCode:s.plan_code, round:s.round, thumbs:s.photoUrls||{},
+    }));
+    adSet({selSessions:sessions});
+  }catch(e){ toast("기록을 불러오지 못했습니다"); }
+}
+
+// 저장된 회차로 리포트를 다시 만들어 공유
+async function resendReport(c, s){
+  const all=state.admin.selSessions;
+  const photos={};
+  REGIONS.forEach(rg=>{ if(s.thumbs?.[rg.id]) photos[rg.id]={url:s.thumbs[rg.id]}; });
+  await exportReport({
+    cust:{ name:c.name, phone4:c.phone4, designer:s.designer||c.designer||"" },
+    result:s,
+    history:all.filter(x=>x.round<=s.round),
+    photos,
+  });
+}
+
+/* ── 카톡 전송용 세로 리포트 (1080 x 1920) ─────────────────
+   외부 라이브러리 없이 캔버스에 직접 그립니다.
+   (인터넷이 느리거나 CDN이 막혀도 리포트 저장이 항상 동작하도록)
+   ──────────────────────────────────────────────────────── */
+const RW=1080, RH=2400, PAD=56;   // RH는 작업용 최대 높이 — 실제 저장 높이는 내용에 맞춰 잘라냅니다
+const F = (w,s) => `${w} ${s}px "Apple SD Gothic Neo","Noto Sans KR","Malgun Gothic",sans-serif`;
+
+function rrect(c,x,y,w,h,r){
+  c.beginPath();
+  c.moveTo(x+r,y); c.lineTo(x+w-r,y); c.quadraticCurveTo(x+w,y,x+w,y+r);
+  c.lineTo(x+w,y+h-r); c.quadraticCurveTo(x+w,y+h,x+w-r,y+h);
+  c.lineTo(x+r,y+h); c.quadraticCurveTo(x,y+h,x,y+h-r);
+  c.lineTo(x,y+r); c.quadraticCurveTo(x,y,x+r,y); c.closePath();
+}
+function wrapLines(c,text,maxW){
+  const out=[]; let line="";
+  for(const ch of String(text||"")){
+    if(ch==="\n"){ out.push(line); line=""; continue; }
+    if(c.measureText(line+ch).width>maxW){ out.push(line); line=ch; }
+    else line+=ch;
+  }
+  if(line) out.push(line);
+  return out;
+}
+function drawCover(c,img,x,y,w,h,r){
+  c.save(); rrect(c,x,y,w,h,r||0); c.clip();
+  const ir=img.width/img.height, br=w/h;
+  let sw=img.width, sh=img.height, sx=0, sy=0;
+  if(ir>br){ sw=img.height*br; sx=(img.width-sw)/2; }
+  else { sh=img.width/br; sy=(img.height-sh)/2; }
+  c.drawImage(img,sx,sy,sw,sh,x,y,w,h);
+  c.restore();
+}
+function loadImg(src){
+  return new Promise(res=>{
+    if(!src) return res(null);
+    const i=new Image(); i.crossOrigin="anonymous";
+    i.onload=()=>res(i); i.onerror=()=>res(null); i.src=src;
+  });
+}
+
+async function exportReport(ctx){
+  ctx = ctx || { cust:state.cust, result:state.result, history:state.history, photos:state.photos };
+  setState({saving:true});
+  try{
+    const r=ctx.result, hist=ctx.history||[];
+    const first=hist.length>1?hist[0]:null;
+    const plan=PLANS[r.planCode]||PLANS.signature;
+    const next=addDays(new Date(),7);
+
+    // 이미지 미리 로드
+    const imgs={};
+    for(const rg of REGIONS){
+      imgs[rg.id]={
+        after: await loadImg(ctx.photos[rg.id]?.url),
+        before: await loadImg(first?.thumbs?.[rg.id]),
+      };
+    }
+    const logo = SALON.logo ? await loadImg(SALON.logo) : null;
+
+    const cv=document.createElement("canvas");
+    cv.width=RW; cv.height=RH;
+    const c=cv.getContext("2d");
+
+    // 배경
+    const bg=c.createLinearGradient(0,0,RW*0.4,RH);
+    bg.addColorStop(0,"#fdfbf7"); bg.addColorStop(0.55,"#f8f4ed"); bg.addColorStop(1,"#f2efe6");
+    c.fillStyle=bg; c.fillRect(0,0,RW,RH);
+    c.fillStyle="rgba(63,143,99,0.09)";
+    c.beginPath(); c.ellipse(RW/2,-120,620,420,0,0,Math.PI*2); c.fill();
+
+    let y=PAD+18;
+
+    // 헤더
+    if(logo){ drawCover(c,logo,PAD,y-10,logo.width*(56/logo.height),56,0); y+=26; }
+    c.textAlign="left"; c.fillStyle=AC2; c.font=F(700,19);
+    c.fillText(SALON.tag,PAD,y+6);
+    c.fillStyle="#2b2721"; c.font=F(800,30);
+    c.fillText(SALON.name,PAD,y+48);
+    c.textAlign="right"; c.fillStyle="#857d71"; c.font=F(400,20);
+    c.fillText(r.dateText,RW-PAD,y+6);
+    c.fillStyle=AC2; c.font=F(700,22);
+    c.fillText(`${r.designer} 디자이너`,RW-PAD,y+48);
+    y+=86;
+    c.strokeStyle="#e6e0d5"; c.lineWidth=1;
+    c.beginPath(); c.moveTo(PAD,y); c.lineTo(RW-PAD,y); c.stroke();
+    y+=62;
+
+    // 고객명 + 회차 배지
+    c.textAlign="left"; c.fillStyle="#2b2721"; c.font=F(800,46);
+    const nameTxt=`${ctx.cust.name} 고객님`;
+    c.fillText(nameTxt,PAD,y);
+    const nameW=c.measureText(nameTxt).width;
+    const badge=`${r.round}회차`;
+    c.font=F(700,22);
+    const bw=c.measureText(badge).width+40;
+    c.fillStyle=AC2; rrect(c,PAD+nameW+20,y-30,bw,44,22); c.fill();
+    c.fillStyle="#ffffff"; c.textAlign="center";
+    c.fillText(badge,PAD+nameW+20+bw/2,y-1);
+    y+=38;
+
+    // 점수 카드
+    const cardH=228;
+    const g2=c.createLinearGradient(PAD,y,RW-PAD,y+cardH);
+    g2.addColorStop(0,"rgba(79,169,123,0.20)"); g2.addColorStop(1,"rgba(127,212,166,0.05)");
+    c.fillStyle=g2; rrect(c,PAD,y,RW-PAD*2,cardH,30); c.fill();
+    c.strokeStyle=AC+"60"; c.lineWidth=2; rrect(c,PAD,y,RW-PAD*2,cardH,30); c.stroke();
+
+    // 점수 링
+    const cx=PAD+126, cy=y+cardH/2, rad=76;
+    c.lineWidth=17; c.lineCap="round";
+    c.strokeStyle="#ece7dd";
+    c.beginPath(); c.arc(cx,cy,rad,0,Math.PI*2); c.stroke();
+    c.strokeStyle=scoreColor(r.score);
+    c.beginPath(); c.arc(cx,cy,rad,-Math.PI/2,-Math.PI/2+Math.PI*2*(r.score/100)); c.stroke();
+    c.textAlign="center"; c.fillStyle=scoreColor(r.score); c.font=F(800,52);
+    c.fillText(String(r.score),cx,cy+10);
+    c.fillStyle="#9a9184"; c.font=F(400,18);
+    c.fillText("/ 100",cx,cy+38);
+
+    // 점수 카드 우측
+    c.textAlign="left";
+    let ty=y+72;
+    c.fillStyle=scoreColor(r.score); c.font=F(800,34);
+    c.fillText(`${r.grade} · ${scoreLabel(r.score)}`,PAD+250,ty); ty+=42;
+    c.fillStyle="#6e665c"; c.font=F(400,23);
+    c.fillText(r.detailedType||(r.type+" 두피"),PAD+250,ty); ty+=44;
+    if(first){
+      const d=r.score-first.score;
+      c.fillStyle=d>0?"#2f9e5f":d<0?"#dd7a33":"#7a7266"; c.font=F(800,26);
+      c.fillText(d>0?`▲ 1회차 대비 ${d}점 개선`:d<0?`▽ 1회차 대비 ${-d}점 하락`:"1회차와 동일 유지",PAD+250,ty);
+    } else {
+      c.fillStyle="#8a8276"; c.font=F(400,21);
+      c.fillText("첫 진단 · 다음 회차부터 변화를 비교해 드립니다",PAD+250,ty);
+    }
+    y+=cardH+52;
+
+    // 6개 항목
+    c.fillStyle=AC2; c.font=F(700,20);
+    c.fillText("두피 상태 6개 항목",PAD,y); y+=30;
+    const colW=(RW-PAD*2-40)/2;
+    METRICS.forEach((m,i)=>{
+      const col=i%2, row=Math.floor(i/2);
+      const x=PAD+col*(colW+40), yy=y+row*76;
+      const g=r.grades[m.key];
+      const col1=g<=1?"#2f9e5f":g===2?"#c08a00":g===3?"#dd7a33":"#d35454";
+      c.textAlign="left"; c.fillStyle="#4a443c"; c.font=F(600,22);
+      c.fillText(m.label,x,yy+22);
+      c.textAlign="right"; c.fillStyle=col1; c.font=F(700,21);
+      const imp = first && first.grades[m.key]>g;
+      c.fillText(GRADE_TEXT[g]+(imp?"  ▲":""),x+colW,yy+22);
+      c.fillStyle="#ece7dd"; rrect(c,x,yy+34,colW,12,6); c.fill();
+      c.fillStyle=col1; rrect(c,x,yy+34,Math.max(8,colW*(4-g)/4),12,6); c.fill();
+    });
+    y+=3*76+26;
+
+    // 사진 비교
+    const shots=REGIONS.filter(rg=>imgs[rg.id].after);
+    if(shots.length){
+      const gapO=16, cw=(RW-PAD*2-gapO*(shots.length-1))/shots.length;
+      shots.forEach((rg,i)=>{
+        const x=PAD+i*(cw+gapO);
+        c.textAlign="left"; c.fillStyle="#7a7266"; c.font=F(600,19);
+        c.fillText(rg.label,x,y+16);
+        const ph=168;
+        const b=imgs[rg.id].before;
+        if(b){
+          const half=(cw-8)/2;
+          drawCover(c,b,x,y+30,half,ph,14);
+          drawCover(c,imgs[rg.id].after,x+half+8,y+30,half,ph,14);
+          c.fillStyle="rgba(0,0,0,0.7)"; rrect(c,x,y+30+ph-28,half,28,0); c.fill();
+          c.fillStyle="#e0dbd2"; c.font=F(600,15); c.fillText("1회차",x+8,y+30+ph-9);
+          c.fillStyle="rgba(0,0,0,0.7)"; rrect(c,x+half+8,y+30+ph-28,half,28,0); c.fill();
+          c.fillStyle="#8fe0b4"; c.fillText(`${r.round}회차`,x+half+16,y+30+ph-9);
+          c.strokeStyle=AC+"70"; c.lineWidth=2; rrect(c,x+half+8,y+30,half,ph,14); c.stroke();
+        } else {
+          drawCover(c,imgs[rg.id].after,x,y+30,cw,ph,14);
+        }
+      });
+      y+=30+168+34;
+    }
+
+    // 종합 소견
+    c.font=F(400,22);
+    const lines=wrapLines(c,r.summary,RW-PAD*2-64).slice(0,4);
+    const boxH=52+lines.length*34;
+    c.fillStyle="#ffffff"; rrect(c,PAD,y,RW-PAD*2,boxH,24); c.fill();
+    c.strokeStyle=BD; c.lineWidth=1; rrect(c,PAD,y,RW-PAD*2,boxH,24); c.stroke();
+    c.textAlign="left"; c.fillStyle=AC2; c.font=F(700,19);
+    c.fillText("종합 소견",PAD+32,y+34);
+    c.fillStyle="#4a443c"; c.font=F(400,22);
+    lines.forEach((l,i)=>c.fillText(l,PAD+32,y+68+i*34));
+    y+=boxH+28;
+
+    // 더조각 플랜
+    const pH=228;
+    const g3=c.createLinearGradient(PAD,y,RW-PAD,y+pH);
+    g3.addColorStop(0,"rgba(79,169,123,0.26)"); g3.addColorStop(1,"rgba(127,212,166,0.07)");
+    c.fillStyle=g3; rrect(c,PAD,y,RW-PAD*2,pH,26); c.fill();
+    c.strokeStyle=AC+"70"; c.lineWidth=2; rrect(c,PAD,y,RW-PAD*2,pH,26); c.stroke();
+    let py=y+42;
+    c.fillStyle=AC2; c.font=F(700,19);
+    c.fillText("추천 관리 플랜 · 더조각 테라피",PAD+34,py); py+=48;
+    c.fillStyle="#2b2721"; c.font=F(800,38);
+    c.fillText(plan.name,PAD+34,py);
+    const pnW=c.measureText(plan.name).width;
+    c.fillStyle=AC2; c.font=F(700,23);
+    c.fillText(plan.period,PAD+34+pnW+18,py); py+=38;
+    c.fillStyle="#6e665c"; c.font=F(400,21);
+    c.fillText(plan.for,PAD+34,py); py+=46;
+    c.fillStyle=AC2; c.font=F(800,36);
+    c.fillText(won(plan.price),PAD+34,py);
+    const prW=c.measureText(won(plan.price)).width;
+    c.fillStyle="#857d71"; c.font=F(400,21);
+    c.fillText(`${plan.rounds}회 · 회당 ${won(plan.per)}`,PAD+34+prW+20,py);
+    const ptW=c.measureText(`${plan.rounds}회 · 회당 ${won(plan.per)}`).width;
+    const offT=`${plan.off}% 할인`;
+    c.font=F(800,19);
+    const ow=c.measureText(offT).width+26;
+    c.fillStyle=AC2; rrect(c,PAD+34+prW+20+ptW+20,py-24,ow,32,10); c.fill();
+    c.fillStyle="#ffffff"; c.textAlign="center";
+    c.fillText(offT,PAD+34+prW+20+ptW+20+ow/2,py-2);
+    c.textAlign="left";
+    if(plan.gift){
+      c.fillStyle="#c08a00"; c.font=F(700,20);
+      c.fillText(`🎁 ${plan.gift} 증정`,PAD+34,y+pH-24);
+    }
+    y+=pH+26;
+
+    // 다음 권장일
+    c.fillStyle=AC+"1f"; rrect(c,PAD,y,RW-PAD*2,72,20); c.fill();
+    c.strokeStyle=AC+"45"; c.lineWidth=1; rrect(c,PAD,y,RW-PAD*2,72,20); c.stroke();
+    c.fillStyle=AC2; c.font=F(700,24);
+    c.fillText(`다음 관리 권장일 · ${fmtDate(next)}`,PAD+30,y+45);
+
+    y+=72;
+
+    // 내용 높이에 맞춰 잘라내기 (아래 여백이 남지 않도록)
+    const H=Math.round(y+96);
+    const out=document.createElement("canvas");
+    out.width=RW; out.height=H;
+    const o=out.getContext("2d");
+    o.drawImage(cv,0,0,RW,H,0,0,RW,H);
+    o.textAlign="center"; o.fillStyle="#b5ac9f"; o.font=F(400,17);
+    o.fillText("본 리포트는 두피 환경 관리를 위한 참고 자료이며 의료적 진단을 대체하지 않습니다",RW/2,H-38);
+
+    // ── 내보내기 ─────────────────────────────────────────
+    const d=new Date();
+    const fileName=`두피리포트_${ctx.cust.name}_${r.round}회차_${d.getFullYear()}${String(d.getMonth()+1).padStart(2,"0")}${String(d.getDate()).padStart(2,"0")}.png`;
+    const blob=await new Promise(res=>out.toBlob(res,"image/png"));
+    const url=URL.createObjectURL(blob);
+    setState({saving:false});
+
+    // 1순위: 공유 시트 (아이패드·아이폰 → 카톡으로 바로 전송)
+    let shared=false;
+    try{
+      const file=new File([blob],fileName,{type:"image/png"});
+      if(navigator.canShare && navigator.canShare({files:[file]})){
+        await navigator.share({ files:[file], title:`${ctx.cust.name}님 두피 리포트` });
+        shared=true;
+      }
+    }catch(e){ if(e && e.name==="AbortError") shared=true; }   // 사용자가 취소한 경우
+
+    // 2순위: 다운로드 (PC)
+    if(!shared){
+      try{
+        const a=document.createElement("a");
+        a.href=url; a.download=fileName;
+        document.body.appendChild(a); a.click(); a.remove();
+      }catch(e){}
+      // 3순위: 화면에 띄워서 길게 눌러 저장
+      showReportOverlay(url, fileName, blob);
+    }
+  }catch(e){
+    setState({saving:false});
+    toast("리포트 저장 실패: "+e.message);
+  }
+}
+
+// 다운로드가 막히는 기기(아이패드 등)를 위한 미리보기 화면
+function showReportOverlay(url, fileName, blob){
+  const old=document.getElementById("reportOverlay");
+  if(old) old.remove();
+  const ov=el("div",{id:"reportOverlay",style:{position:"fixed",inset:0,zIndex:1000,background:"rgba(20,18,14,0.92)",display:"flex",flexDirection:"column",alignItems:"center",padding:"16px",overflowY:"auto"}});
+
+  ov.appendChild(el("p",{style:{color:"#f3efe7",fontSize:"13px",fontWeight:700,margin:"6px 0 4px",textAlign:"center"}},"리포트가 완성되었습니다"));
+  ov.appendChild(el("p",{style:{color:"#c9c0b3",fontSize:"11.5px",marginBottom:"12px",textAlign:"center",lineHeight:1.6}},"아래 버튼으로 카톡에 바로 보내거나,\n이미지를 길게 눌러 사진에 저장하세요"));
+
+  const btnRow=el("div",{style:{display:"flex",gap:"8px",width:"100%",maxWidth:"420px",marginBottom:"12px"}});
+  const shareBtn=el("button",{style:{flex:2,padding:"14px",borderRadius:"13px",background:`linear-gradient(135deg,${AC},${AC2})`,border:"none",color:"#ffffff",fontSize:"14px",fontWeight:800,cursor:"pointer"}},"💬 카톡으로 보내기");
+  shareBtn.addEventListener("click",async()=>{
+    try{
+      const file=new File([blob],fileName,{type:"image/png"});
+      if(navigator.canShare && navigator.canShare({files:[file]})) await navigator.share({files:[file]});
+      else window.open(url,"_blank");
+    }catch(e){}
+  });
+  const closeBtn=el("button",{style:{flex:1,padding:"14px",borderRadius:"13px",background:"rgba(255,255,255,0.12)",border:"none",color:"#f3efe7",fontSize:"13px",fontWeight:700,cursor:"pointer"}},"닫기");
+  closeBtn.addEventListener("click",()=>ov.remove());
+  btnRow.append(shareBtn,closeBtn);
+  ov.appendChild(btnRow);
+
+  ov.appendChild(el("img",{src:url,style:{width:"100%",maxWidth:"420px",borderRadius:"12px",display:"block",boxShadow:"0 10px 40px rgba(0,0,0,0.5)"}}));
+  document.body.appendChild(ov);
+}
+
+render();
+loadSettings().then(render);   // 저장된 디자이너 명단·가격을 불러온 뒤 다시 그립니다
+</script>
+</body>
+</html>
