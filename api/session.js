@@ -7,11 +7,8 @@
 const BUCKET = "scalp-photos";
 
 export default async function handler(req, res) {
-  if (req.method !== "POST") return res.status(405).json({ error: "POST only" });
-
   const URL_ = process.env.SUPABASE_URL;
   const KEY = process.env.SUPABASE_SERVICE_KEY;
-  if (!URL_ || !KEY) return res.status(501).json({ error: "Supabase 미설정" });
 
   const H = {
     apikey: KEY,
@@ -20,6 +17,42 @@ export default async function handler(req, res) {
   };
   const rest = (path, init = {}) =>
     fetch(`${URL_}/rest/v1/${path}`, { ...init, headers: { ...H, ...(init.headers || {}) } });
+
+  /* ── 연결 점검 (브라우저에서 /api/session?diag=1 로 열어봅니다)
+        키 값 자체는 절대 출력하지 않습니다. 확인이 끝나면 지워도 됩니다. ── */
+  if (req.method === "GET" && req.query && req.query.diag === "1") {
+    const out = {
+      SUPABASE_URL_설정: !!URL_,
+      SUPABASE_SERVICE_KEY_설정: !!KEY,
+      주소: URL_ ? String(URL_).replace(/^https?:\/\//, "").replace(/\/+$/, "") : null,
+      주소_끝에_슬래시: URL_ ? /\/$/.test(URL_) : null,
+      키_길이: KEY ? KEY.length : 0,
+      키_종류: null,
+      테이블: {},
+      스토리지: null,
+    };
+    try {
+      const payload = JSON.parse(Buffer.from(String(KEY).split(".")[1], "base64").toString());
+      out.키_종류 = payload.role || "알 수 없음";
+    } catch (e) { out.키_종류 = "JWT 형식이 아님"; }
+
+    if (URL_ && KEY) {
+      for (const t of ["scalp_customers", "scalp_sessions", "scalp_settings"]) {
+        try {
+          const r = await rest(`${t}?select=count&limit=1`);
+          out.테이블[t] = r.ok ? "정상" : `오류 ${r.status}: ${(await r.text()).slice(0, 120)}`;
+        } catch (e) { out.테이블[t] = "연결 실패: " + e.message; }
+      }
+      try {
+        const r = await fetch(`${URL_}/storage/v1/bucket/${BUCKET}`, { headers: H });
+        out.스토리지 = r.ok ? "정상" : `오류 ${r.status}`;
+      } catch (e) { out.스토리지 = "연결 실패"; }
+    }
+    return res.status(200).json(out);
+  }
+
+  if (req.method !== "POST") return res.status(405).json({ error: "POST only" });
+  if (!URL_ || !KEY) return res.status(501).json({ error: "Supabase 미설정" });
 
   try {
     const { action, customer, session, photos } = req.body || {};
