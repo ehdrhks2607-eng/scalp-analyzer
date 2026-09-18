@@ -216,6 +216,40 @@ export default async function handler(req, res) {
       return res.status(200).json({ sessions: rows || [] });
     }
 
+    /* ── 삭제 (되돌릴 수 없음) ── */
+    const removePhotos = async (paths) => {
+      const list = paths.filter(Boolean);
+      if (!list.length) return;
+      await fetch(`${URL_}/storage/v1/object/${BUCKET}`, {
+        method: "DELETE",
+        headers: H,
+        body: JSON.stringify({ prefixes: list }),
+      }).catch(() => {});
+    };
+
+    // 회차 한 건 삭제 (사진 포함)
+    if (action === "deleteSession") {
+      const id = req.body.sessionId;
+      const rows = await (await rest(`scalp_sessions?id=eq.${id}&select=photos`)).json();
+      await removePhotos(Object.values(rows?.[0]?.photos || {}));
+      const del = await rest(`scalp_sessions?id=eq.${id}`, { method: "DELETE" });
+      if (!del.ok) return res.status(500).json({ error: await del.text() });
+      return res.status(200).json({ ok: true });
+    }
+
+    // 고객 전체 삭제 (모든 회차 + 사진)
+    if (action === "deleteCustomer") {
+      const cid = req.body.customerId;
+      const rows = await (await rest(`scalp_sessions?customer_id=eq.${cid}&select=photos`)).json();
+      const paths = [];
+      for (const r of rows || []) paths.push(...Object.values(r.photos || {}));
+      await removePhotos(paths);
+      await rest(`scalp_sessions?customer_id=eq.${cid}`, { method: "DELETE" });
+      const del = await rest(`scalp_customers?id=eq.${cid}`, { method: "DELETE" });
+      if (!del.ok) return res.status(500).json({ error: await del.text() });
+      return res.status(200).json({ ok: true, deletedSessions: (rows || []).length });
+    }
+
     if (action === "setEnrollment") {
       const up = await rest(`scalp_customers?id=eq.${req.body.customerId}`, {
         method: "PATCH",
