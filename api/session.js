@@ -28,6 +28,9 @@ export default async function handler(req, res) {
       주소_끝에_슬래시: URL_ ? /\/$/.test(URL_) : null,
       키_길이: KEY ? KEY.length : 0,
       키_종류: null,
+      함수가_보는_변수이름들: Object.keys(process.env)
+        .filter((k) => /SUPA|SUPB|GEMINI|KEY|URL/i.test(k))
+        .sort(),
       테이블: {},
       스토리지: null,
     };
